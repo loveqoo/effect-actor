@@ -35,6 +35,9 @@ export type { ActorRef, ActorSystemHandle } from "./ref.js";
 export { ActorRef as ActorRefOps } from "./ref.js";
 
 export type { ActorContext } from "./context.js";
+export { ActorContext as ActorContextOps } from "./context.js";
 
-export type { Behavior, BehaviorMeta } from "./behavior.js";
+export type { Behavior, BehaviorEffect, BehaviorMeta } from "./behavior.js";
 export { Behaviors, unwrapMeta } from "./behavior.js";
+
+export { interpretStep, runInterpreter } from "./interpreter.js";

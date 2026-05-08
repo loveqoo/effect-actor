@@ -5,6 +5,9 @@ import { MailboxPolicy } from "./mailbox.js";
 // Behavior<Msg> ADT — 액터의 _다음 동작_ 을 표현하는 불변 값.
 // 사이클 2: ADT + 빌더 + 메타 추출 (sync 부분). 해석기는 사이클 3.
 
+// handler 의 fail 채널은 unknown — supervision 외피 (ADR-020) 가 catchAllCause 로 받음.
+export type BehaviorEffect<Msg> = Effect.Effect<Behavior<Msg>, unknown>;
+
 export type Behavior<Msg> =
   | { readonly _tag: "Same" }
   | { readonly _tag: "Stopped" }
@@ -15,11 +18,11 @@ export type Behavior<Msg> =
       readonly handle: (
         ctx: ActorContext<Msg>,
         msg: Msg,
-      ) => Effect.Effect<Behavior<Msg>>;
+      ) => BehaviorEffect<Msg>;
     }
   | {
       readonly _tag: "Setup";
-      readonly init: (ctx: ActorContext<Msg>) => Effect.Effect<Behavior<Msg>>;
+      readonly init: (ctx: ActorContext<Msg>) => BehaviorEffect<Msg>;
     }
   | {
       readonly _tag: "WithMailbox";
@@ -39,21 +42,18 @@ export const Behaviors = {
   unhandled: <Msg>(): Behavior<Msg> => UNHANDLED,
 
   receive: <Msg>(
-    handle: (
-      ctx: ActorContext<Msg>,
-      msg: Msg,
-    ) => Effect.Effect<Behavior<Msg>>,
+    handle: (ctx: ActorContext<Msg>, msg: Msg) => BehaviorEffect<Msg>,
   ): Behavior<Msg> => ({ _tag: "Receive", handle }),
 
   receiveMessage: <Msg>(
-    handle: (msg: Msg) => Effect.Effect<Behavior<Msg>>,
+    handle: (msg: Msg) => BehaviorEffect<Msg>,
   ): Behavior<Msg> => ({
     _tag: "Receive",
     handle: (_ctx, msg) => handle(msg),
   }),
 
   setup: <Msg>(
-    init: (ctx: ActorContext<Msg>) => Effect.Effect<Behavior<Msg>>,
+    init: (ctx: ActorContext<Msg>) => BehaviorEffect<Msg>,
   ): Behavior<Msg> => ({ _tag: "Setup", init }),
 
   // Mailbox 정책을 부착한 래퍼 (ADR-018, ADR-026).

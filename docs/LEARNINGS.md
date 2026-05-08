@@ -78,4 +78,13 @@
 - [effect-ts] mailbox.ts 의 `export type MailboxPolicy = ... ; export const MailboxPolicy = { ... }` — type + const 같은 이름. 한 import 로 type + value 둘 다 참조 가능. verbatimModuleSyntax 도 OK. 라이브러리 코드 import 패턴 표준화.
 - [tooling] TS 의 `noUnusedParameters` + variance annotation — phantom Msg 가 union 의 _어떤 케이스에도 안 나오면_ unused. 해결: Receive/Setup 추가하면 자연 등장. 사이클 2 의 종결자만 있는 단계에서는 `_Msg` prefix 또는 placeholder 케이스 추가. 다음 사이클 추가 시 자연 정리.
 
+### 2026-05-09 — M1 사이클 3 (ActorContext + 해석 루프 + Supervision 외피)
+
+- [process] TDD 잘게 쪼갠 효과 — 사이클 2 에서 _큰 Red 한 번_ 보다, 사이클 3 의 _5단계 Red→Green_ 이 오류 디버깅 부담 적음. 한 단위 fail 시 _이전 통과_ 가 의도 보장. 사이클 3 끝나도 _supervision invariant_ 가 _별도 Red_ 로 박혀 한눈에 명세 보임.
+- [effect-ts] `Effect.catchAllCause(self, () => Effect.void)` 가 _fail + defect_ 둘 다 흡수. `Effect.catchAll` 만 쓰면 die (defect) 못 잡음 — supervision 외피의 _완전한_ 차단을 위해 `catchAllCause` 가 정확. (사이클 5 supervision strategy 도 같은 패턴.)
+- [architecture] handler 의 fail 채널 `unknown` 으로 — 사용자가 `Effect.fail(any Error)` 자유롭게 던질 수 있음. supervision 외피가 _전부 받음_. ADR-020 의 의미: _interpreter 와 같은 fiber 안의 catchAllCause 외피_ — 이 한 줄이 코드로 정확히 표현.
+- [api/?] _Same 반환은 이전 behavior 유지_ 가 사이클 3 의 _첫 행동 fix_. interpreter.test 의 "Receive 가 Same 반환하면 _현재 Receive_ 그대로" 가 _Akka semantics_ 정확. counter actor 테스트 (Same 반환 4번) 으로도 검증됨.
+- [api] Setup 한 겹만 풀음 — `init` 결과가 또 Setup 이면 _재평가 안 함_. Akka 정통 (Setup 의 결과가 시작 behavior). 중첩 Setup 은 사용자 의도가 흐려서 의미 없음. 사이클 5 도그푸딩에서 발견되면 ADR.
+- [process] 사이클 3 이 _가장 어려운 사이클_ 이라 했지만 _TDD + 잘게 쪼개기_ 로 ~30분에 끝남. 16 새 테스트, 누적 68. 사이클 1 의 _큰 한 번_ 보다 사이클 3 의 _작은 5번_ 이 _체감 부담 더 적음_.
+
 
