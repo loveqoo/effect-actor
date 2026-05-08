@@ -2,6 +2,8 @@
 
 > _색인 + 게시판_. 각 마일스톤의 _현재 상태_ 를 한눈에.
 > 자세한 내용은 다른 문서(API, ARCHITECTURE)를 참조하고, 여기는 _진행 상황_ 만.
+>
+> _2026-05-09 plan-eng-review 결과 반영. ADR-016~026 박힘._
 
 ---
 
@@ -10,12 +12,12 @@
 | 마일스톤 | 상태 | 목표 |
 |---|---|---|
 | M0. 정보 모으기 | 🟢 완료 | docs/ 묶음 작성. AGENTS.md 색인 |
-| M1. 최소 동작 | ⚪ 대기 | spawn / tell / receive (Stable ref + Mailbox 분리) |
-| M2. Lifecycle | ⚪ 대기 | setup / PostStop / PreRestart 신호 |
+| M1. 최소 동작 + setup | ⚪ 대기 | spawn / tell / receive + setup (Stable ref + Mailbox 분리) |
+| M2. Lifecycle | ⚪ 대기 | PostStop + 도그푸딩 시작 (ADR-024) |
 | M3. Stop + Watch | ⚪ 대기 | ctx.stop / watch / Terminated / ChildFailed |
 | M4. Restart | ⚪ 대기 | Supervision strategies (resume/restart/stop) |
 | M5. 고급 기능 | ⚪ 대기 | Backoff / withLimit / Stash / Timer |
-| M∞. 도그푸딩 + 출시 | ⚪ 대기 | poly-phony에서 본격 사용 → npm publish |
+| M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
 
@@ -26,68 +28,82 @@
 > 사이클이 시작되기 _전_ 의 준비 단계.
 
 - [x] `docs/AKKA_REFERENCE.md` — Akka Typed 핵심 정리
-- [x] `docs/ARCHITECTURE.md` — 내부 런타임 모델
+- [x] `docs/ARCHITECTURE.md` — 내부 런타임 모델 (2026-05-09 plan-eng-review 반영)
 - [x] `docs/API.md` — 사용자 API 시안
-- [x] `docs/DECISIONS.md` — ADR 기록
+- [x] `docs/DECISIONS.md` — ADR 기록 (ADR-001~026)
 - [x] `docs/PLAN.md` — 이 문서
-- [x] `docs/LEARNINGS.md` — 빈 셸
+- [x] `docs/LEARNINGS.md` — 사이클 학습 누적
 - [x] `AGENTS.md` + `CLAUDE.md` — AI 진입점 색인
 
-이 단계가 끝나면 _계획 리뷰_ 단계(`/plan-devex-review`, `/plan-eng-review`)로 넘어간다.
+이 단계가 끝나면 _계획 리뷰_ 단계로 넘어간다.
+
+- [x] `/plan-devex-review` — 2026-05-08 (DX SCORECARD 작성)
+- [x] `/plan-eng-review` — 2026-05-09 (ADR-016~026 박힘. ARCHITECTURE 모순 해결)
 
 ---
 
-## M1. 최소 동작 — Stable ref + Mailbox 분리
+## M1. 최소 동작 — Stable ref + Mailbox 분리 + setup
 
 **이 시점에 사용자가 할 수 있는 것:**
-- `ActorSystem.create(behavior, "name")` 으로 시스템 만들기
-- root 액터에 메시지 보내기 (`tell`)
+- `ActorSystem.create<RootMsg>(behavior, "name")` 으로 시스템 만들기 (ADR-026)
+- `system.root.tell(msg)` 로 root 액터에 메시지 보내기
 - 메시지 받아서 다음 Behavior 반환
+- `Behaviors.setup` 으로 자원 초기화 (ADR-025)
 
 **포함:**
-- `ActorPath` / `ActorRef[Msg]` (path 기반 핸들)
-- `Registry` — path → ActorEntry
-- `ActorEntry` — Mailbox(Queue<Msg>) + Children(Ref<Set>) + Status(Ref)
-- `Behavior<Msg>` ADT + 해석기
-- `Behaviors.receive` / `Behaviors.receiveMessage` / `Behaviors.same` / `Behaviors.stopped`
+- `ActorPath` / `ActorRef<Msg>` (path + uid + cell + system — ADR-016, ADR-019)
+- `Cell<Msg>` (mailbox + signalQueue, EffectTS Queue)
+- `ActorEntry` — Cell + children/watchers/watching/fiber/status/scope (TRef/TMap, STM — ADR-017)
+- `Registry` (TMap path → entry, STM tx)
+- `Behavior<Msg>` ADT + 해석기 + Supervision 외피 (ADR-020)
+- `Behaviors.receive` / `.receiveMessage` / `.same` / `.stopped` / `.setup`
+- `Behaviors.withMailbox` (ADR-018, ADR-026)
 - `ActorContext.spawn` / `ctx.self`
-- `ActorSystem.create` / `ActorSystem.shutdown`
+- `ActorSystem<RootMsg>.create` / `ActorSystem.shutdown`
+- Instance Scope (per actor — ADR-021)
 
 **일부러 제외:**
 - supervision (M4에서)
 - watch / Terminated (M3에서)
 - ask 패턴 (M3 또는 M5에서. 임시 actor spawn이 의존)
-- setup / signal (M2에서)
+- PostStop (M2에서 — ADR-021 cleanup 우선순위 명시)
 
 **도전 과제:**
+- Spawn 의 0단계 (메타 추출) 구현 (ADR-026)
+- Tell hot path (cell direct + STM read-only tx) (ADR-019)
+- Instance Scope 시작/종료 — ctx.fork 가 그 Scope 안 (ADR-021)
+- ActorSystem<RootMsg> generic 추론 (ADR-026)
 - ctx 전달 방식 확정 (ADR-007 잠정)
-- Mailbox 정책 (capacity, backpressure) 확정 (ADR-008 잠정)
-- Fiber lifecycle과 entry status 동기화
+- Fiber lifecycle 과 entry status 동기화 (TRef)
 
-**마일스톤 완료 조건 (DoD):** _ADR-011 적용._
-- [ ] `examples/01-counter.ts` — 단순 카운터 액터, `tsx` 로 실행 시 정상 출력
-- [ ] EffectTS Tagged Error 패턴 도입 (`ActorNotFound` 정의 — _ADR-012_)
-- [ ] _Outside Voice 발견(OV-1, 2, 4, 5, 8) 모두 plan-eng-review 에서 결정 끝났음_
-
-> ⚠️ **M1 진입 전 결정 필요:** ADR-014 (도그푸딩 시점), ADR-015 (M1 범위 확장 여부). plan-eng-review 세션에서 처리.
+**마일스톤 완료 조건 (DoD):**
+- [ ] `examples/01-counter.ts` — 단순 카운터 액터 + setup, `tsx` 로 실행 시 정상 출력
+- [ ] EffectTS Tagged Error 패턴 도입 (`ActorNotFound`, `IncarnationMismatch` — ADR-012, ADR-016)
+- [ ] tell hot path 가 cell direct (ADR-019)
+- [ ] STM tx 로 Registry/spawn/stop 정합성 (ADR-017)
+- [ ] _ARCHITECTURE 모순 없음_ — ADR-016~026 모두 반영 (2026-05-09 plan-eng-review)
 
 ---
 
-## M2. Lifecycle
+## M2. Lifecycle — PostStop + 도그푸딩 시작
 
 **이 시점에 사용자가 할 수 있는 것:**
-- `Behaviors.setup` 으로 초기화 작업
-- PostStop 신호로 자원 정리
+- PostStop 신호로 _명시_ cleanup hook (ADR-021 — 자동 cleanup 은 instance Scope 가)
+- `Behaviors.receiveSignal` 로 신호 처리
 
 **포함:**
-- `Behaviors.setup`
 - `Behaviors.receiveSignal` 빌더
 - Signal: `PostStop` (M3에서 Terminated 추가)
 - SignalQueue + take 우선순위 (ADR-009)
 
 **도전 과제:**
-- setup 이 _최초 1회_ 만 실행되는지, _restart마다_ 다시 실행되는지 명세 (Akka는 restart마다)
+- setup 이 _최초 1회_ 만 실행되는지, _restart마다_ 다시 실행되는지 명세 (Akka 는 restart 마다, ADR-021 도)
+- PostStop vs instance Scope 자동 cleanup 의 우선순위 — ARCHITECTURE.md §3.8 명시 (ADR-021)
 - DeathPact 정책 (Terminated 미처리 시 자기도 실패) 의 _signal 검출 로직_ — M3까지 미룸
+
+**마일스톤 완료 조건 (DoD):**
+- [ ] `examples/02-lifecycle.ts` — setup + PostStop 로 자원 초기화/정리하는 액터
+- [ ] **도그푸딩 시작 (~1주, ADR-024)** — poly-phony 에서 한 agent 만들어보기. M1~M2 토대 검증 (incarnation/cell ref/Scope/STM/setup/PostStop). 발견된 issue 는 LEARNINGS.md + 후속 사이클 입력.
 
 ---
 
@@ -95,22 +111,27 @@
 
 **이 시점에 사용자가 할 수 있는 것:**
 - `ctx.stop(child)` 로 자식 종료
-- `ctx.watch(other)` / `watchWith` 로 다른 액터 감시
+- `ctx.watch(other)` / `watchWith` 로 다른 액터 감시 (ADR-022)
 - Terminated / ChildFailed 신호 처리
 - ask 패턴 사용
 
 **포함:**
 - `ctx.stop`
-- `ctx.watch` / `ctx.watchWith` / `ctx.unwatch`
+- `ctx.watch` / `ctx.watchWith` / `ctx.unwatch` (TMap<{path, uid}, WatchMessage> 양방향 — ADR-022)
 - Signal 확장: `Terminated`, `ChildFailed`
 - DeathPact (미처리 시 자살)
-- ask 패턴 (임시 actor + Deferred + timeout)
+- ask 패턴 (임시 actor + Deferred + timeout — ask temp actor 의 instance Scope 자기 소유 — ADR-021)
 - 부모-자식 cascade stop
 
 **도전 과제:**
-- watchers / children 동시성 — STM이 적합한가, Ref+atomic update가 충분한가
-- ask의 임시 actor 명명 / 정리 보장
-- ChildFailed의 cause 표현 (EffectTS의 Cause<E>를 그대로 노출?)
+- watchKey (path, uid) 인스턴스 비교 정확성 (ADR-016, ADR-022)
+- ask 의 임시 actor 명명 / 정리 보장 (ADR-021 Scope)
+- ChildFailed 의 cause 표현 (EffectTS Cause<E> 그대로 노출?)
+
+**마일스톤 완료 조건 (DoD):**
+- [ ] `examples/03-watch.ts` — 자식 감시하는 부모. ABA 안전성 (재spawn 후 옛 watcher 잘못된 Terminated 안 받음) 검증
+- [ ] `examples/04-ask.ts` — ask 패턴 + timeout
+- [ ] **M3 끝 도그푸딩 (~1주, ADR-024)** — watch + ask 조합 의미 검증.
 
 ---
 
@@ -122,19 +143,26 @@
 - 예외 타입별 분기
 
 **포함:**
-- `Behaviors.supervise` 빌더
+- `Behaviors.supervise` 빌더 (Behavior 래퍼 — ADR-026 메타 추출)
 - `Strategies.resume` / `restart` / `stop`
-- Restart 흐름:
-  - PreRestart 신호
-  - 현재 Fiber interrupt
+- Restart 흐름 (ADR-020):
+  - Supervision 외피의 catchAll
+  - PreRestart 신호 (현재 Behavior 가 receiveSignal 처리)
   - 자식 cascade stop
-  - 새 Behavior로 Fiber 재시작
-  - mailbox 보존
+  - Instance Scope 닫고 새로 (ADR-021 — fork/timer/scoped resource 자동 정리)
+  - Setup 재실행 → 새 Behavior
+  - 새 Fiber 로 해석 루프 재시작
+  - mailbox 보존 (cell 인스턴스 동일)
 - Error matcher (예외 타입 분기)
 
 **도전 과제:**
-- _Stable ref_ 가 진짜로 동작함을 검증. 외부에서 보낸 메시지가 restart 도중 mailbox에 쌓였다가 새 fiber에서 처리되는지.
-- supervise wrapping의 nested 처리 (여러 onFailure chain)
+- _Stable ref_ 가 진짜로 동작함을 검증 — 외부에서 보낸 메시지가 restart 도중 mailbox 에 쌓였다가 새 fiber 에서 처리되는지
+- Supervise wrapping 의 nested 처리 (여러 onFailure chain)
+- PreRestart 처리 도중 재실패 → 정책 재적용 (강도 제한)
+
+**마일스톤 완료 조건 (DoD):**
+- [ ] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증
+- [ ] **M4 끝 도그푸딩 (~1주, ADR-024)** — supervision 의미 검증.
 
 ---
 
@@ -149,25 +177,31 @@
 **포함:**
 - `Strategies.restartWithBackoff(opts)` (Schedule 기반)
 - `.withLimit({ maxNrOfRetries, withinTimeRange })`
-- `Behaviors.withStash` + `Stash` 인터페이스
-- `Behaviors.withTimers` + `Timers` 인터페이스
+- `Behaviors.withStash` + `Stash` 인터페이스 (instance Scope — ADR-021)
+- `Behaviors.withTimers` + `Timers` 인터페이스 (instance Scope)
 - `ctx.scheduleOnce`
 
 **도전 과제:**
-- Backoff schedule이 mailbox 보존과 충돌하지 않는지
-- Stash 용량 초과 시 supervision으로 흘리는 흐름
-- Timer가 액터 stop 시 자동 정리
+- Backoff schedule 이 mailbox 보존과 충돌하지 않는지
+- Stash 용량 초과 시 supervision 으로 흘리는 흐름
+- Timer 가 액터 stop 시 자동 정리 (instance Scope 닫힘 — ADR-021)
+
+**마일스톤 완료 조건 (DoD):**
+- [ ] `examples/06-backoff.ts` — restartWithBackoff
+- [ ] `examples/07-stash.ts` — withStash
+- [ ] `examples/08-timer.ts` — withTimers
+- [ ] **M5 끝 _본격_ 도그푸딩 (ADR-024)** — poly-phony 전면 도그푸딩 시작.
 
 ---
 
-## M∞. 도그푸딩 + 출시
+## M∞. 본격 도그푸딩 + 출시
 
 **이 시점에 사용자가 할 수 있는 것:**
 - poly-phony에서 `@loveqoo/effect-actor` import 해서 실제 Agent 구축
 - npm publish
 
 **포함:**
-- poly-phony에서 진짜 사용
+- poly-phony 에서 진짜 사용
 - 발견된 API 어색함 → 본 레포에서 수정 → minor 버전 갱신
 - `setup-deploy` 셋업 (npm publish 흐름)
 - `/ship` / `/land-and-deploy` 흐름 적용
@@ -176,9 +210,9 @@
 **도전 과제:**
 - npm 패키지 이름 결정 (`@loveqoo/effect-actor` 후보)
 - 첫 배포 직전 `/devex-review`, `/codex review`, `/health` 통과
-- README / CHANGELOG / docs 영어판 (비공식적으로는 한국어 docs를 그대로 두되, 영어 README는 별도)
-- **semver 정책 확정** (현재 미정 — F6 결정에 따라 M∞ 직전에 ADR로 박음. 후보: `0.x = minor가 breaking, patch는 fix-only / 1.0+ = SemVer`)
-- 영어 README 작성 (한국어 docs/는 그대로)
+- README / CHANGELOG / docs 영어판 (비공식적으로는 한국어 docs 그대로, 영어 README 별도)
+- **semver 정책 확정** (현재 미정 — F6 결정에 따라 M∞ 직전에 ADR 로 박음. 후보: `0.x = minor 가 breaking, patch 는 fix-only / 1.0+ = SemVer`)
+- 영어 README 작성 (한국어 docs/ 그대로)
 - CONTRIBUTING.md / ISSUE_TEMPLATE / PR template 추가
 
 ---
@@ -198,6 +232,8 @@
 - 이 문서의 체크리스트 갱신
 - 짧은 3줄 회고 (사용자와)
 
+**M2/M3/M4 끝마다** _가벼운 도그푸딩 사이클_ (~1주, poly-phony agent — ADR-024). M5 끝 _본격_ 도그푸딩.
+
 ---
 
 ## 갱신 규칙
@@ -208,29 +244,38 @@
 
 ---
 
-## OUTSIDE VOICE FINDINGS
+## OUTSIDE VOICE FINDINGS — 모두 결정 끝 (2026-05-09)
 
-> 2026-05-08 plan-devex-review 세션에서 Codex outside voice가 짚은 발견 10개.
-> 모두 _M1 시작 전 별도 plan-eng-review 세션_ 에서 본격 결정.
-> 이 섹션은 _발견을 흘리지 않기 위한 그물_. 결정 끝난 항목은 ADR로 옮기고 여기서 빼낸다.
+**Round 1 (2026-05-08, plan-devex-review)**: 10개 발견 (Critical 5, Important/Strategy 5).
 
-| # | 등급 | 영역 | 발견 |
+**Round 2 (2026-05-09, plan-eng-review codex)**: 10개 발견 (Critical 4, Important/Strategy 6) — round 1 결정에 대한 교차 검증.
+
+전부 결정되어 **ADR-016 ~ ADR-026** 으로 박힘.
+
+| Round | # | 발견 | 결정 ADR |
 |---|---|---|---|
-| OV-1 | 🔴 Critical | ARCHITECTURE 2.2/2.3/3.4, API 2.2 | ActorRef가 path만 들고 incarnation 개념 없음 → ABA 버그. 액터 재spawn 시 옛 ref가 새 액터 가리킴. 단일 프로세스에서도 안전하지 않음. |
-| OV-2 | 🔴 Critical | ARCHITECTURE 3.5/3.6/5 | PreRestart/PostStop 흐름 모순. supervision 래퍼가 해석기 _밖_ 인데 PreRestart를 _현재 behavior_ 가 처리한다고 적힘. 실패 시점에 해석 루프 깨짐. |
-| OV-3 | 🟡 Important | DECISIONS ADR-008 | bounded mailbox + backpressure 기본값이 tell의 fire-and-forget 깸. AI/agent burst 워크로드에서 sender suspend → 그래프 정지. ADR-008 재고. |
-| OV-4 | 🔴 Critical | ARCHITECTURE 2.3/2.4/3.1/3.6 | Registry/children/watchers/fiber/status 여러 Ref 분리. 트랜잭션 경계 없음 → 중간 실패/경합에서 찢어진 상태. STM 거의 필수. |
-| OV-5 | 🔴 Critical | ARCHITECTURE 3.5, PLAN M4, API 3.2/3.5 | Mailbox 보존 restart의 가정이 _handler가 순수한 한 개 effect_ 라고 깔고 있음. Effect 사용자는 fork/timer/scoped resource 쉽게 만듦 → 부작용 누수 위에 메시지만 재처리하는 반쯤 망가진 restart 위험. |
-| OV-6 | 🟡 Strategy | DECISIONS ADR-004, PLAN M∞ | 도그푸딩 미루기 = 전략 오류. 진짜 위험은 기능 누락이 아니라 _API 감각/cost model/supervision 의미_ 가 실제 코드에서 맞느냐. ADR-014 (제안) 로 재고. |
-| OV-7 | 🟡 Strategy | PLAN M1~M4, API 전체 | M1=spawn/tell/receive 만으론 Competitive TTHW 목표(2-5분)에서 _Nact 대신 쓸 이유_ 안 보임. ADR-015 (제안) 로 M1 범위 확장 검토. |
-| OV-8 | 🔴 Critical | ARCHITECTURE 2.3/3.4, API 2.3/3.4 | watchWith 데이터 모델 미정. `watchers: Set<ActorPath>` 로는 "누가 어떤 메시지로 변환해서 감시 중" 표현 불가. 중복 watch / unwatch semantics 미정. |
-| OV-9 | 🟡 Important | DECISIONS ADR-002, ARCHITECTURE 2.2/3.2 | Path-string lookup hot path 비용 + 과설계. Stable ref의 본질은 mailbox cell identity 유지지 path lookup 강제 아님. 단일 프로세스 0.x에선 더 단순 가능. |
-| OV-10 | 🟡 Important | API 2.2/6, PLAN M1 | `narrow<U extends Msg>()` 가 TypeScript 단순 캐스팅. 라이브러리가 supervision/lifecycle은 강제하면서 타입 안전성에선 무력. selling point로 어려움. |
+| R1 | OV-1 | ActorRef incarnation UID | ADR-016 |
+| R1 | OV-2 | Supervision 외피 위치 | ADR-020 |
+| R1 | OV-3 | Mailbox 정책 (unbounded 기본) | ADR-018 (ADR-008 supersedes) |
+| R1 | OV-4 | Registry STM 트랜잭션 경계 | ADR-017 |
+| R1 | OV-5 | Restart 시 cleanup scope | ADR-021 |
+| R1 | OV-8 | watchWith 자료구조 | ADR-022 |
+| R1 | OV-9 | Path lookup hot path | ADR-019 |
+| R1 | OV-10 | narrow 타입 안전성 | ADR-023 |
+| R1 | (ADR-014) | 도그푸딩 시점 | ADR-024 (ADR-004 supersedes) |
+| R1 | (ADR-015) | M1 범위 | ADR-025 |
+| R2 | OV2-1 | Watch key (path, uid) | ADR-022 (보강) |
+| R2 | OV2-2 | Tell 선형화 (best-effort) | ADR-019 (보강) |
+| R2 | OV2-3 | ARCHITECTURE invariant 정정 | ADR-020 (보강) |
+| R2 | OV2-4 | Scope 소유권 표 | ADR-021 (보강, §3.7) |
+| R2 | OV2-5 | Behavior 메타 추출 순서 | ADR-026 |
+| R2 | OV2-6 | ActorSystem<RootMsg> 타입 | ADR-026 |
+| R2 | OV2-7 | setup/PostStop 우선순위 | ADR-021 (보강, §3.8) |
+| R2 | OV2-8 | STM vs 시스템 fiber | ADR-017 (재고 후 STM 유지) |
+| R2 | OV2-9 | 도그푸딩 시점 재재고 | ADR-024 (M3 → M2 끝 시작) |
+| R2 | OV2-10 | narrowUnsafe + adapter API 예제 | ADR-023 (보강) |
 
-**관련 ADR:**
-- ADR-014 (제안): ADR-004 (도그푸딩 시점) 재고 — OV-6 대응
-- ADR-015 (제안): M1 범위 확장 — OV-7 대응
-- 나머지 OV-1, 2, 3, 4, 5, 8, 9, 10 은 _M1 시작 전 plan-eng-review_ 에서 ADR-016~ 로 박힐 예정
+**M1 진입 시 _구조적 모순 없는_ 상태 보장.**
 
 ---
 
@@ -243,9 +288,9 @@
 | Dimension            | 현재     | F1-F6+M1 후 | M5+M∞ 후                  |
 |----------------------|----------|-------------|---------------------------|
 | Getting Started      | 3/10     | 8/10        | 8/10                      |
-| API/CLI/SDK 설계     | 7/10     | 7/10        | 9/10 (잠정 결정 확정)     |
+| API/CLI/SDK 설계     | 7/10     | 8/10        | 9/10 (ADR-026 typed root) |
 | Error Messages       | 2/10     | 6/10        | 8/10 (구체 어휘 확정)     |
-| Documentation        | 7/10     | 7/10        | 8/10 (영어 README)        |
+| Documentation        | 7/10     | 8/10        | 8/10 (영어 README)        |
 | Upgrade Path         | 3/10     | 3/10        | 7/10 (semver + CHANGELOG) |
 | Dev Environment      | 4/10     | 8/10        | 8/10                      |
 | Community            | 2/10     | 3/10        | 7/10 (CONTRIBUTING 등)    |
@@ -257,35 +302,41 @@
 | Product Type         | Library/SDK (TypeScript, EffectTS-based)            |
 | Mode                 | POLISH                                              |
 | Persona              | EffectTS 파워 유저, agent/AI 빌더                   |
-| Overall DX           | 3.9/10   | 5.6/10      | 7.5/10                    |
+| Overall DX           | 3.9/10   | 5.7/10      | 7.5/10                    |
 +============================================================================+
-| DX 원칙 커버리지 (F1-F6+M1 후 기준)                                         |
+| DX 원칙 커버리지 (F1-F6+M1 후 기준 + plan-eng-review 보강)                 |
 | Zero Friction        | covered (스케치 README + examples/)                 |
 | Learn by Doing       | covered (실행 가능 examples/)                       |
 | Fight Uncertainty    | partial (에러 종류만, 구체 어휘는 사이클별)         |
 | Opinionated + Escape | covered (Akka Typed 모양 + EffectTS escape)         |
-| Code in Context      | covered (API.md 7개 예시)                           |
+| Code in Context      | covered (API.md 8개 예시 + adapter actor 추가)      |
 | Magical Moments      | covered (M1 후 README before/after 등장)            |
 +============================================================================+
 ```
 
 **리뷰 결과 요약:**
-- 현재 평균 ~3.9/10. 코드 부재 + README 부재 + examples 부재가 대부분 차감.
-- F1-F6 결정 + M1 셋업 완료 후 ~5.6/10. _Outside Voice 발견_ 들이 plan-eng-review에서 풀리고 M1이 끝나면 정확 측정 가능.
-- M5+M∞ 후 ~7.5/10. 0.x 범위에서는 합리적 상한.
-- **블로커:** Outside Voice OV-1~5, OV-8 (Critical 5개). M1 진입 전 plan-eng-review에서 결정 안 되면 ARCHITECTURE.md가 _틀린 상태로_ 코드 작성 시작.
+- 현재 평균 ~3.9/10 → F1-F6+plan-eng-review 후 ~5.7/10 → M5+M∞ 후 ~7.5/10.
+- ADR-016~026 박힘으로 _ARCHITECTURE 모순_ 없음 → M1 진입 안전.
+- M2 끝 도그푸딩 시작 (ADR-024) 으로 토대 검증 _이른 시점_.
 
-**처리된 결정 (이 세션):**
-- F1: 스케치 README 지금 (✅ README.md 작성 완료)
+**처리된 결정 (모든 세션):**
+
+_plan-devex-review (2026-05-08):_
+- F1: 스케치 README 지금 (✅ README.md 작성)
 - F3: M1부터 examples/ 동작 (✅ ADR-011)
-- F4: 디버그 모드 placeholder만 (✅ ARCHITECTURE.md §4.4)
+- F4: 디버그 모드 placeholder만 (✅ ARCHITECTURE.md §4.4, ADR-013)
 - F5: 에러 종류 ARCHITECTURE에, 어휘 사이클별 (✅ ADR-012)
-- F6: semver M∞ 직전 (✅ PLAN.md M∞ 노트)
+- F6: semver M∞ 직전 (✅ M∞ 노트)
 
-**미처리 결정 (plan-eng-review 이관):**
-- OV-1, 2, 3, 4, 5, 8, 9, 10 (8개)
-- ADR-014 (도그푸딩 시점 재고)
-- ADR-015 (M1 범위 확장)
+_plan-eng-review round 1 (2026-05-09):_
+- OV-1, 2, 3, 4, 5, 8, 9, 10 → ADR-016~023
+- ADR-014 → ADR-024 (M3 끝 가벼운, round 2 에서 M2 끝으로 정정)
+- ADR-015 → ADR-025
+
+_plan-eng-review round 2 (2026-05-09):_
+- OV2-1~10 → 위 ADR 보강 + ADR-026 신규
+
+**미처리 결정:** 없음. M1 시작 가능.
 
 ---
 
@@ -295,11 +346,12 @@
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | 범위 & 전략 | 0 | — | — |
 | Codex Review | `/codex review` | 독립 2nd opinion | 0 | — | — |
-| Eng Review | `/plan-eng-review` | 아키텍처 & 테스트 (필수) | 0 | — | — |
+| Eng Review | `/plan-eng-review` | 아키텍처 & 테스트 (필수) | 1 | clean | ADR-016~026 박힘. 20개 결정 모두 처리 (round 1 + 2 outside voice). M1 진입 안전. |
 | Design Review | `/plan-design-review` | UI/UX (해당 없음, 라이브러리) | 0 | n/a | n/a |
-| DX Review | `/plan-devex-review` | 개발자 경험 | 1 | issues_found | overall 3.9/10 → 5.6 (예상). Critical 5개는 plan-eng-review로 이관. F1-F6 처리됨. |
+| DX Review | `/plan-devex-review` | 개발자 경험 | 1 | issues_found | overall 3.9/10 → 5.7 (예상). Critical 5개 plan-eng-review 로 이관. F1-F6 처리됨. |
+| Outside Voice (Codex) | `/codex review` (plan-eng-review 안) | 독립 plan 검증 | 1 | issues_found→resolved | round 2 에서 10개 새 발견 모두 결정. |
 
-- **OUTSIDE VOICE (Codex):** 1회 실행 — 10개 발견(Critical 5, Important/Strategy 5). 모두 plan-eng-review로 이관.
-- **CROSS-MODEL:** Codex와 Claude의 발견은 _상충하지 않고 보완_. Claude는 DX 표면(README, examples, 에러 어휘) 짚고, Codex는 아키텍처 근본(incarnation, signal 흐름, 트랜잭션 경계, 부작용 누수, watchWith 자료구조) 짚음.
-- **UNRESOLVED:** 8 항목 (OV-1, 2, 3, 4, 5, 8, 9, 10) + ADR-014, ADR-015.
-- **VERDICT:** DX Review 1회 완료. **Eng Review 필요 (M1 진입 전 필수)** — 미실행. 따라서 _NOT CLEARED for M1 코딩_.
+- **OUTSIDE VOICE (Codex):** 2회 실행 (round 1 plan-devex-review, round 2 plan-eng-review). 총 20개 발견 모두 ADR 박힘.
+- **CROSS-MODEL:** Codex 와 Claude 발견은 _상충 X, 보완_ — Claude 는 DX/표면 (README, examples, 에러 어휘), Codex 는 아키텍처 근본 + 결정 교차 검증.
+- **UNRESOLVED:** 0 (모두 결정).
+- **VERDICT:** **CLEARED** — Eng Review (plan) 1회 clean. M1 진입 가능. _ARCHITECTURE 모순 없음._

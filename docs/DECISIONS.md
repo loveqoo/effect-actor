@@ -78,19 +78,21 @@ poly-phony에서 ActorRef가 closure-bound value였고 mailbox가 인스턴스�
 ---
 
 ## ADR-004: 도그푸딩은 모든 기능 완성 후 한 번에
-- 상태: accepted
+- 상태: superseded by ADR-024 (2026-05-09)
 - 일자: 2026-05-08
 
 ### 맥락
 도그푸딩을 _마일스톤마다_ 점진적으로 할지, _전 기능 완성 후_ 한 번에 할지.
 
-### 결정
+### 결정 (superseded)
 **모든 기능 완성 후 본격 도그푸딩.** 단, 보완책으로 `docs/API.md` 에 _상상의 사용 예시_ 를 풍부하게 적어 임시 도그푸딩 그물로 삼는다.
 
 ### 결과
 - (+) 인프라가 이리저리 흔들리는 동안 응용을 짤 부담 없음.
 - (-) API 모양 어긋남이 늦게 발견됨 → 발견 시 큰 갈아엎기 위험.
 - (관리책) `docs/API.md` 의 사용 예시를 _진짜 사용처럼_ 작성. 시그니처가 어색해 보이면 곧장 고침. 이게 도그푸딩의 _프록시_.
+
+> _supersede 이유 (2026-05-09): plan-eng-review round 2 에서 Codex 가 짚음. 진짜 위험은 기능 누락이 아니라 _API 감각 / cost model / supervision 의미_ 가 실제 코드에서 맞는지. M1~M2 의 토대 (incarnation/cell ref/Scope) 가 진짜 동작하는지 _M2 끝 시점_ 에 부딪혀야. ADR-024 로 정정._
 
 ---
 
@@ -153,22 +155,20 @@ Akka는 거대하다. 어디까지 다룰지 명확히 해야 _완성_ 의 정�
 ---
 
 ## ADR-008: Mailbox 기본은 bounded + backpressure
-- 상태: accepted (잠정)
+- 상태: superseded by ADR-018 (2026-05-09)
 - 일자: 2026-05-08
 
 ### 맥락
-메일박스 정책 후보:
-- unbounded — 메모리 폭발 위험
-- bounded with drop — 메시지 유실
-- bounded with backpressure — tell이 suspend
+메일박스 정책 후보: unbounded, bounded with drop, bounded with backpressure.
 
-### 결정
-**기본은 bounded(capacity 1024) + backpressure.** 사용자가 `Behaviors.withMailbox({ unbounded: true })` 등으로 override 가능.
+### 결정 (superseded)
+**기본은 bounded(capacity 1024) + backpressure.**
 
 ### 결과
 - (+) 메모리 안전성 기본.
-- (+) EffectTS Queue의 backpressure와 결이 맞음.
-- (-) Akka의 dispatcher 모델과는 다른 동작 → Akka 사용자에게 살짝 낯섦.
+- (-) Akka 의 dispatcher 모델과는 다른 동작 → Akka 사용자에게 살짝 낯섦.
+
+> _supersede 이유 (2026-05-09): Codex 짚음. 페르소나 (AI/agent 빌더) 의 burst 워크로드에서 sender suspend → 그래프 정지. tell fire-and-forget 약속 깨짐. ADR-018 로 정정 (unbounded 기본 + 옵션)._
 
 ---
 
@@ -233,7 +233,7 @@ docs/API.md 의 예시는 _읽을_ 수는 있어도 _실행_ 안 됨. 코드와 
 에러 메시지 어휘를 _지금_ 일괄 박을지, _사이클마다_ 결정할지.
 
 ### 결정
-**계층적 접근:** 최상위 에러 종류(ActorNotFound, MailboxFull, AskTimeout, DeathPactException, StashOverflow 등)는 ARCHITECTURE.md §4.5 에 _지금_ 나열. EffectTS Tagged Error 표현 도입은 M1 첫 사이클. 구체 메시지 텍스트/권장 fix/문서 링크는 _관련 패스의 사이클_ 에서 확정.
+**계층적 접근:** 최상위 에러 종류(ActorNotFound, IncarnationMismatch, MailboxFull, AskTimeout, DeathPactException, StashOverflow 등)는 ARCHITECTURE.md §4.5 에 _지금_ 나열. EffectTS Tagged Error 표현 도입은 M1 첫 사이클. 구체 메시지 텍스트/권장 fix/문서 링크는 _관련 패스의 사이클_ 에서 확정.
 
 ### 결과
 - (+) 일관성 — 모든 에러가 같은 패턴(Tagged Error).
@@ -260,49 +260,337 @@ docs/API.md 의 예시는 _읽을_ 수는 있어도 _실행_ 안 됨. 코드와 
 
 ---
 
-## ADR-014: 도그푸딩 시점 재고 (ADR-004 보완)
-- 상태: proposed (2026-05-08, plan-eng-review 결정 대기)
-- 출처: Codex outside voice 발견 6번
+## ADR-014: 도그푸딩 시점 재고 (제안 — superseded by ADR-024)
+- 상태: superseded by ADR-024 (2026-05-09)
+- 출처: plan-eng-review D10 결정 (M3 끝 가벼운 + M5 끝 본격) → round 2 재고 → ADR-024
 
-### 맥락
-ADR-004 는 "도그푸딩은 모든 기능 완성 후" 였음. Codex outside voice가 짚음:
-> 도그푸딩을 모든 기능 완성 후로 미루는 건 전략 오류다. 이 라이브러리의 위험은 기능 누락이 아니라 API 감각, cost model, supervision 의미가 실제 agent 코드에서 맞는지다.
-
-### 결정
-**미결정.** M1 시작 전 plan-eng-review 세션에서 결정.
-
-후보:
-- A. ADR-004 그대로 유지 (한 번에 도그푸딩)
-- B. 마일스톤마다 _최소 도그푸딩_ (M2 끝 → poly-phony에서 setup/PostStop 시도, M3 끝 → watch 시도, ...)
-- C. M3 끝부터 도그푸딩 시작 (setup + watch 까지가 첫 유의미한 사용 경험)
-
-### 결과
-- 결정 시 ADR-004를 _superseded by ADR-014_ 로 마킹.
+> _proposed → renumbered/refined as ADR-024 (M2 끝 시작) — round 2 OV2-9 결과._
 
 ---
 
-## ADR-015: M1 범위 재고 (Codex 7번 발견)
-- 상태: proposed (2026-05-08, plan-eng-review 결정 대기)
-- 출처: Codex outside voice 발견 7번
+## ADR-015: M1 범위 확장 (superseded by ADR-025)
+- 상태: superseded by ADR-025 (2026-05-09)
+- 출처: plan-eng-review D6 결정 (M1 + setup) → ADR-025 로 박힘.
+
+> _proposed → renumbered as ADR-025._
+
+---
+
+## ADR-016: ActorRef 에 incarnation UID + watch key (path, uid)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-1 (round 1) + OV2-1 (round 2)
 
 ### 맥락
-현재 M1 = `spawn / tell / receive` 만. 그러나 _Competitive TTHW(2-5분)_ 목표를 잡았는데, M1 끝난 시점의 라이브러리로는 Nact 대비 차별점이 안 보임. 사용자가 _이걸 왜 써야 하나_ 답을 못 얻음.
+Codex outside voice round 1: 현재 ActorRef 가 path-only → 동명 재spawn 시 옛 ref 가 새 액터에 메시지 전달 → ABA 위험. 단일 프로세스에서도 발생.
+
+Round 2 추가 발견: UID 가 ref 에만 붙으면 watch 쪽 ABA 그대로 — `target.watchers: TMap<watcherPath, ...>` 가 path-only 면 재spawn 동명 액터에 _옛 watcher 가 따라붙어_ 잘못 Terminated 발사.
 
 ### 결정
-**미결정.** M1 시작 전 plan-eng-review 세션에서 결정.
+**ActorRef = `{ path, uid, cell, system }`** (uid 는 spawn 시 부여되는 UUID, restart 에 유지, stop 후 재spawn 시 새 uid).
 
-후보:
-- A. M1 그대로 (skeleton만)
-- B. M1에 setup + PostStop (ADR-002 의 stable ref 모델이 첫 라운드부터 일부 동작 검증됨)
-- C. M1에 ask 까지 (단 ask는 임시 actor spawn에 의존이라 setup이 먼저 필요)
+**Watch key = `(path, uid)`** — `target.watchers: TMap<{path, uid}, WatchMessage>` (ADR-022 와 결).
+
+tell hot path: STM read-only tx 로 entry.uid === ref.uid 검증, 다르면 dead letter.
 
 ### 결과
-- 결정 시 PLAN.md M1 섹션 갱신.
+- (+) 단일 프로세스에서 ABA 구조적 차단. 멀티노드 확장 시도 일관.
+- (+) Akka Typed 정통 — incarnation UID 모델.
+- (+) Watch 의 동명 재spawn 잘못된 Terminated 발사 차단.
+- (-) ref 사이즈 +UUID. UUID 생성 비용 (spawn 시 1회).
+
+---
+
+## ADR-017: STM 부분 도입 (TRef + TMap) — 시스템 명령 fiber 와 비교
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-4 (round 1) + OV2-8 (round 2)
+
+### 맥락
+Round 1: ActorEntry 의 children/watchers/status/fiber 가 여러 Ref 분리 → spawn/stop/watch 가 _여러 entry 의 여러 필드_ 를 동시 갱신해야 정합성 유지. 트랜잭션 경계 없음 → 찢어진 상태 위험.
+
+Round 2 (Codex 재고): _시스템 전용 명령 fiber 하나_ 가 spawn/stop/watch 를 직렬화하는 더 단순한 안. STM 은 _0.x 단일 프로세스 lifecycle 드뭄_ 에서 과설계 우려.
+
+### 결정
+**STM 부분 도입 (TRef + TMap) 선택.** Registry 의 path → entry 는 TMap. children/watchers/status/fiber 는 TRef. spawn/stop/watch 는 STM tx. Mailbox/signalQueue 는 일반 EffectTS Queue.
+
+**시스템 명령 fiber 와의 비교 (왜 STM):**
+- 둘 다 _구조적 안전_ 제공.
+- STM: 병렬 시도 + auto retry. 사용자 STM tx 합성 가능성 (추후 옵션).
+- 명령 fiber: 직렬 처리. 단순 + 학습 비용 0.
+- 0.x 에선 _둘 다 충분_, STM 채택 — 사용자 노출 가능성 + EffectTS 1급 제공 도구.
+
+### 결과
+- (+) 트랜잭션 경계 명시. 찢어진 상태 구조적 차단.
+- (+) EffectTS STM 의 자연스러운 활용처. 향후 사용자 코드 수준 합성 여지.
+- (-) STM 학습 부담 (개발 측). TMap/TRef API 일반 자료구조와 약간 다름.
+- (-) Mailbox 의 enqueue 는 STM 밖 → tell 의 완전 원자성 보장 안 함 (ADR-019 best-effort 명시로 보완).
+
+---
+
+## ADR-018: Mailbox 기본 unbounded + capacity 옵션
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-3 (round 1)
+- supersedes: ADR-008
+
+### 맥락
+ADR-008 의 _bounded + backpressure_ 가 tell 의 fire-and-forget 약속 깨뜨림. 페르소나 (AI/agent 빌더) burst 워크로드에서 sender suspend → 그래프 정지.
+
+### 결정
+**기본 unbounded.** 사용자가 `Behaviors.withMailbox({ capacity, overflow: "backpressure" | "drop" | "fail" })` 로 명시 선택. Akka Typed 정통 (그쪽도 기본 unbounded).
+
+### 결과
+- (+) AI/agent burst 워크로드 안전. tell fire-and-forget 약속 유지.
+- (+) Akka Typed 와 일관.
+- (-) 메모리 폭발 위험을 사용자가 안다 — README "메모리 우려 있으면 capacity 명시" 경고 필요.
+
+---
+
+## ADR-019: ActorRef 가 cell 직접 보유 + best-effort delivery 명시
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-9 (round 1) + OV2-2 (round 2)
+
+### 맥락
+Round 1: 현재 ARCHITECTURE.md 의 tell 은 _매번 registry resolve_ → AI burst 워크로드에서 path serialize + Map lookup 누적 비용. Stable ref 의 본질은 _mailbox cell identity_ 이지 path lookup 강제 아님.
+
+Round 2 (Codex 재고): 결정 1+2+9 의 조합에서 uid/status 검증은 STM, 실제 enqueue 는 Queue.offer — 둘 사이 race 가능. _tell 선형화 의미_ 명시 필요.
+
+### 결정
+**ActorRef = `{ path, uid, cell, system }`** — cell 직접 보유 (mailbox + signalQueue 의 stable reference).
+
+**tell hot path:**
+1. STM read-only tx: entry.uid === ref.uid 검증 + status check
+2. cell.mailbox.offer(msg) — registry lookup 0회
+
+**송신 결과 명시 (best-effort delivery):**
+- _stale ref_ (uid 불일치): dead letter
+- _in-flight stop_ (검증 후 enqueue 사이에 stop): 옛 cell 에 enqueue, 아무도 안 읽음 (의미적 소실)
+- _fresh_: enqueue 성공
+
+Akka 와 동일 — tell 은 _delivery 보장 안 함_. 사용자가 보장 원하면 명시 supervision 또는 ack 패턴.
+
+### 결과
+- (+) tell hot path lookup 0회. AI burst 워크로드에서 최소 비용.
+- (+) Stable ref 의 본질 정확 — mailbox cell identity 유지.
+- (+) Akka best-effort 의미 일관 + 송신 결과 표 명시.
+- (-) ref 사이즈 증가 (cell ref). Spawn 단계 cell 생성 + ref 조립.
+- (-) in-flight stop 시 메시지 의미적 소실 — 사용자 인지 필요 (Akka 와 동일 동작이나 명시 필요).
+
+---
+
+## ADR-020: Supervision 외피 (해석기와 같은 fiber, invariant 정정)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-2 (round 1) + OV2-3 (round 2)
+
+### 맥락
+Round 1: ARCHITECTURE.md §3.5 (Restart) 가 _현재 Behavior 가 PreRestart 처리_ 라 적힘. 그 Behavior 는 방금 실패해서 _깨진 fiber_ 안 — supervision 래퍼는 §1 에서 _해석기 밖_ 에 있는데 어떻게 그 Behavior 에 PreRestart 발사? 모순.
+
+Round 2 (Codex 재고): "supervision 은 해석기 밖" invariant 자체가 잘못 — 래퍼가 _현재 Behavior 인스턴스_ 추적해야 PreRestart 발사 가능. 즉 supervision 과 interpreter 가 _같은 fiber, 같은 광광_. 문서 표현 정정 필요.
+
+### 결정
+**Supervision 은 _interpreter 와 같은 fiber 안의 외피_** (catchAll wrapper). 래퍼가 _현재 Behavior 인스턴스_ 추적.
+
+PreRestart 흐름: catchAll → strategy 결정 → 만약 restart 면 signalQueue.offer(PreRestart) → 현재 Behavior 가 receiveSignal 로 처리 → instance Scope 닫고 새로 → setup 재실행 → 새 Behavior 로 재시작.
+
+재귀 실패 (PreRestart 처리 도중 재실패) 시 strategy 재적용. 강도 제한 (max retry).
+
+ARCHITECTURE.md §1 다이어그램 갱신: "L3 Supervision 외피 — interpreter 와 같은 fiber, catchAll, 현재 Behavior 추적". §5 invariant 정정.
+
+### 결과
+- (+) OV-2 결정 보존. 모순 해결.
+- (+) Akka ActorCell 광광과 일관 — cell 이 supervisor + Behavior 둘 다 보유.
+- (+) PreRestart 가 사용자 코드 수준 hook (Akka Typed 와 일관).
+- (-) "단순 분리" 원리 약간 느슨. 문서 표현 정정 (광광 인정).
+
+---
+
+## ADR-021: Instance Scope (자동 cleanup) + 소유권 표 + cleanup 우선순위
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-5 (round 1) + OV2-4, OV2-7 (round 2)
+
+### 맥락
+Round 1: 사용자가 receiveMessage handler 안에서 `Effect.fork`/`Schedule.scheduleAt`/scoped resource 만들면 → restart 시 _좀비 fiber_ 남음. mailbox 보존 restart 의 _handler 가 순수한 한 effect_ 가정 깨짐.
+
+Round 2 (Codex):
+- Scope 경계 미명시 — 부모 restart 시 자식 actor / timer / ask temp / ctx.fork / setup resource 가 _각각 어느 scope 소유_ 인지 불분명.
+- setup M1 + PostStop M2 어정쩡 — instance Scope 가 cleanup 기본이면 PostStop 역할 줄여야, 또는 같이 와야. 우선순위 없음.
+
+### 결정
+**Instance Scope** (액터 spawn 시 열림, stop/restart 시 닫힘): EffectTS Scope. ctx.fork / timer / scoped resource 모두 instance Scope 소유.
+
+**Scope 소유권 표** (ARCHITECTURE.md §3.7 신규):
+
+| 자원 | 소유 Scope | restart 시 |
+|---|---|---|
+| 자식 actor | 자기 instance Scope (부모 Scope 아님) | 부모 cascade stop 정책에 따라 stop |
+| ctx.fork fiber | 부모 instance Scope | 부모 restart 시 닫힘 |
+| Timer | 부모 instance Scope | restart 시 닫힘 |
+| Ask 임시 actor | 자기 instance Scope | 부모 restart 와 무관 (독립) |
+| Setup resource | instance Scope | restart 시 닫고 setup 재실행 |
+| Stash | instance Scope | restart 시 비워짐 |
+
+**Cleanup 모델 우선순위:**
+1. _자동_ (기본): instance Scope 의 finalize. 대부분 사용자.
+2. _명시 hook_ (M2 후): PostStop 신호. fiber 영역 밖 알림 (외부 시스템 등).
+
+### 결과
+- (+) OV-5 핵심 해결 — 좀비 fiber 자동 정리.
+- (+) Akka 액터 lifetime 관점 그대로.
+- (+) 두 cleanup 모델 (자동 vs 명시 hook) 우선순위 명시.
+- (-) 한 메시지만 살아야 하는 짧은 fork 는 사용자가 Effect.scoped 직접 래핑 (ctx 수준 hook 은 instance lifetime 만 제공).
+
+---
+
+## ADR-022: watchers/watching 자료구조 — TMap<{path, uid}, WatchMessage> 양방향
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-8 (round 1) + OV2-1 (round 2)
+
+### 맥락
+Round 1: 현재 `watchers: Set<ActorPath>` 로는 watchWith 의 _누가 어떤 메시지로 변환해서 감시 중_ 표현 불가. Akka Typed semantics 모방 필요.
+
+Round 2: watch key 가 path-only 면 동명 재spawn 시 _옛 watcher 가 새 entry 에 따라붙어_ 잘못 Terminated. ADR-016 의 incarnation 일관 위해 (path, uid).
+
+### 결정
+**target.watchers**: `TMap<{path, uid}, WatchMessage>`
+**watcher.watching**: `TMap<{path, uid}, WatchMessage>` (양방향)
+
+Where:
+```
+WatchMessage =
+  | { _tag: "Terminated" }                  // ctx.watch
+  | { _tag: "Custom"; msg: unknown }        // ctx.watchWith
+```
+
+**Semantics (Akka Typed):**
+- 한 watcher-target 쌍 당 하나의 WatchMessage.
+- 재호출 (`watch` 후 `watchWith`): 덮어쓰기.
+- `unwatch(target)`: 그 쌍 (path, uid) 제거.
+
+target 사망 시: target.watchers 의 각 (watcherKey, msg) 에 대해 entry.signalQueue.offer(변환 결과). 동시에 entry.uid === watcherKey.uid 검증 (ABA 차단).
+
+### 결과
+- (+) Akka Typed semantics 정확.
+- (+) ABA 안전 — 동명 재spawn 시 옛 watcher 잘못 연결 차단.
+- (+) STM TMap 으로 OV-4 결정과 결 맞음.
+- (-) Map 두 개 (target watchers + watcher watching). spawn/stop/watch 시 둘 다 갱신.
+- (-) TMap 키 가 조합 (path, uid) — hash/equality 정의 필요.
+
+---
+
+## ADR-023: narrowUnsafe 로 이름 변경 + adapter actor 패턴 권장
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV-10 (round 1) + OV2-10 (round 2)
+
+### 맥락
+Round 1: API.md 의 `ActorRef.narrow<U extends Msg>()` 가 TypeScript 단순 캐스팅 → 런타임 안전성 X. 라이브러리가 supervision/lifecycle 강제하면서 타입 안전성에선 무력 → selling point 어려움.
+
+Round 2 (Codex): 이름만 변경하는 건 미봉. 부분 프로토콜 노출의 _대체 수단_ (adapter actor) 을 API.md 예제로 같이 박지 않으면 사용자는 그냥 캐스팅.
+
+### 결정
+**메서드 명: `narrow` → `narrowUnsafe`** — 사용자 명시 인지.
+
+**API.md §3.8 (신규): adapter actor 패턴 예제** — _권장 안전 대안_. 메시지 변환 actor spawn 해서 좁은 메시지 제한 표현.
+
+`narrowUnsafe` 설명에 "권장 대안: adapter actor" 명시 (API.md §2.2).
+
+향후 _Schema 검증 narrow_ (Effect Schema 기반) 도입 여지 — 둘 나눠서 공존 가능.
+
+### 결과
+- (+) 사용자가 unsafe 를 _호출할 때마다_ 인지 — 정직.
+- (+) Adapter actor 패턴이 _첫 페이지_ 에서 노출 → 권장 대안 우선 선택 유도.
+- (+) Codex 우려 ("이름만 설공") 정확 대응.
+- (-) Akka 의 narrow 와 이름 다름 — Akka 사용자 처음 한 번 설명 필요.
+
+---
+
+## ADR-024: 도그푸딩 시점 — M2 끝 시작
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review ADR-014 D10 (M3 끝) → OV2-9 (round 2 재고)
+- supersedes: ADR-004
+
+### 맥락
+ADR-004 (한 번에 도그푸딩 — M5+M∞ 끝) 이 Codex round 1 우려. ADR-014 (D10) 에서 _M3 끝 가벼운 + M5 끝 본격_ 으로 재고. 하지만 round 2 Codex: M3 까지 기다리는 게 _여전히 늦음_. 가장 위험한 건 watch/restart 보다 _M1~M2 의 토대_ (incarnation/cell ref/Scope) 가 코드에서 진짜 동작하는지.
+
+### 결정
+**M2 끝 도그푸딩 시작.** ~1주, poly-phony 에서 _setup + PostStop + 상태 갖는 actor_ 한 개 만들어보기. M1~M2 토대 검증.
+
+**M3 끝, M4 끝 추가 도그푸딩** (마일스톤마다 ~1주). M5 끝 _본격_ 도그푸딩.
+
+M1 동안은 docs/API.md + examples/ 가 _프록시 도그푸딩_ (ADR-004 정신 일부 보존).
+
+### 결과
+- (+) M1~M2 토대 (incarnation/cell ref/Scope/STM) 가 쓴 코드에서 진짜 동작 — M3 사이클에 토대 오류 안 가져감.
+- (+) Codex round 2 우려 수확.
+- (-) 사이클 관리 부담 약간 증가 (M2/M3/M4 끝마다 도그푸딩 세션).
+
+---
+
+## ADR-025: M1 범위 — spawn / tell / receive + setup
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review ADR-015 D6
+
+### 맥락
+ADR-015 (제안): M1 = spawn/tell/receive 만으론 Codex 의 Competitive TTHW 우려에 답 못함 (Nact 대비 차별점 안 보임). 후보: M1 그대로, M1 + setup, M1 + setup + PostStop, M1 + setup + watch + ask.
+
+### 결정
+**M1 = spawn/tell/receive + Behaviors.setup.**
+
+추가 비용 극소: Behavior ADT 한 케이스 + Behaviors.setup 빌더 + 해석기 한 분기. M1 사이클 길이 터지지 않음.
+
+PostStop 은 M2 에 남김 (ADR-021 의 _자동 vs 명시 hook_ 우선순위 명시로 어정쩡함 해소).
+
+### 결과
+- (+) 사용자 첫 코드가 setup 으로 _자원 초기화_ — Akka 정통 진입점.
+- (+) examples/01-counter.ts 가 의미 있는 데모 (단순 counter + setup 자원).
+- (-) PostStop 없이 setup 만 — _setup 한쪽 짝_ 상태로 M2 까지 (ARCHITECTURE.md §3.8 cleanup 우선순위 표 로 의미 명시).
+
+---
+
+## ADR-026: ActorSystem<RootMsg> generic + behavior 메타 추출 단계
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: plan-eng-review OV2-5 + OV2-6 (round 2)
+
+### 맥락
+Round 2 Codex:
+- ADR-018 의 `Behaviors.withMailbox` 가 Behavior 래퍼인데 mailbox 는 spawn 2단계에서 생성 → spawn 전에 _벗겨서_ 메타 추출 순서 미정. supervise/setup 도 같은 패턴.
+- ADR-025 의 setup 추가는 root typing 결정 강제 — system.root 가 ActorRef<???> 어떤 타입?
+
+### 결정
+
+**A. ActorSystem<RootMsg> generic** (Akka Typed 정통):
+```
+ActorSystem<RootMsg> {
+  root: ActorRef<RootMsg>;
+  ...
+}
+ActorSystem.create<RootMsg>(behavior, name): Effect<ActorSystem<RootMsg>>
+```
+
+**B. Behavior 메타 추출 단계 명시** (ARCHITECTURE.md §3.1 0단계):
+spawn 시 Behavior 의 외곽 래퍼 (WithMailbox / Supervise / Setup) 를 _벗겨서_ 메타 추출 후 시작 behavior 결정. 같은 패턴이 모든 래퍼 ADT 에 적용.
+
+API.md §2.5 에 `Behaviors.withMailbox` 추가.
+
+### 결과
+- (+) 사용자 첫 코드부터 타입 안전. examples/01 이 신뢰할 수 있는 타입 약속.
+- (+) ADT 일관 — supervise/withMailbox/setup 모두 Behavior 래퍼. 학습 표면 단일.
+- (+) 추가 항목 (stash, withTimers) 도 같은 패턴 — 식단적 확장.
+- (-) ActorSystem 타입 파라미터 추가 (사용자 명시 또는 추론).
+- (-) Spawn 구현에 메타 추출 단계 추가 — 구현 복잡도 조금.
 
 ---
 
 ## 갱신 규칙
 
-- 새 결정은 다음 ADR 번호로 추가 (ADR-011, ADR-012, ...).
-- 결정이 뒤집히면 새 ADR을 만들고 _이전 ADR의 상태를 `superseded by ADR-XXX` 로_ 변경. 본문은 그대로 둠 (역사 보존).
+- 새 결정은 다음 ADR 번호로 추가.
+- 결정이 뒤집히면 새 ADR 을 만들고 _이전 ADR 의 상태를 `superseded by ADR-XXX` 로_ 변경. 본문은 그대로 둠 (역사 보존).
 - 잠정(accepted (잠정))은 도그푸딩 또는 첫 구현 후 _확정_ 으로 갱신.

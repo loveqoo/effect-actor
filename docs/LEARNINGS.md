@@ -32,12 +32,27 @@
 ### 2026-05-08 — plan-devex-review (M0 직후)
 
 - [workflow] outside voice (Codex) 가 _DX 표면 리뷰_ 가 놓치는 _아키텍처 근본_ 을 짚는다. plan-devex-review는 표면 마찰점, plan-eng-review는 구조에 강함 — 두 시각이 보완 관계.
-- [architecture] path-only ActorRef는 단일 프로세스에서도 ABA 위험. 재spawn 동명 액터에 옛 ref가 도달. **incarnation UID** 가 사실상 필수. (Codex OV-1, plan-eng-review에서 결정)
-- [architecture] supervision 래퍼를 _해석기 밖_ 에 두는 모델은 PreRestart/PostStop 흐름과 모순. signal handling을 _누가 어디서_ 하는지 다시 설계 필요. (Codex OV-2)
-- [architecture] Registry/children/watchers/fiber/status 분리 = 트랜잭션 경계 부재. STM이 _필수_. spawn/stop/watch 경합에서 찢어진 상태가 그렇지 않으면 발생. (Codex OV-4)
-- [architecture] Mailbox 보존 restart는 _handler 내부 부작용_ 의 정리 범위가 명시 안 되면 반쯤 망가진 재시작. EffectTS의 `Scope` 활용 필요. (Codex OV-5)
-- [api/?] `narrow<U extends Msg>()` 가 단순 캐스팅이라 타입 안전성 보장 없음. supervision은 강제하면서 타입은 사용자 거짓 허용 = 모순. Schema-based message validation 검토. (Codex OV-10)
-- [strategy] 도그푸딩 미루기는 위험. 진짜 위험은 기능 누락이 아니라 _API 감각/cost model/supervision 의미_ 가 실제 코드에서 맞느냐. ADR-004 재고 (ADR-014 제안). (Codex OV-6)
+- [architecture] path-only ActorRef는 단일 프로세스에서도 ABA 위험. 재spawn 동명 액터에 옛 ref가 도달. **incarnation UID** 가 사실상 필수. (Codex OV-1 → ADR-016)
+- [architecture] supervision 래퍼를 _해석기 밖_ 에 두는 모델은 PreRestart/PostStop 흐름과 모순. signal handling을 _누가 어디서_ 하는지 다시 설계 필요. (Codex OV-2 → ADR-020)
+- [architecture] Registry/children/watchers/fiber/status 분리 = 트랜잭션 경계 부재. STM이 _필수_. spawn/stop/watch 경합에서 찢어진 상태가 그렇지 않으면 발생. (Codex OV-4 → ADR-017)
+- [architecture] Mailbox 보존 restart는 _handler 내부 부작용_ 의 정리 범위가 명시 안 되면 반쯤 망가진 재시작. EffectTS의 `Scope` 활용 필요. (Codex OV-5 → ADR-021)
+- [api] `narrow<U extends Msg>()` 가 단순 캐스팅이라 타입 안전성 보장 없음. supervision은 강제하면서 타입은 사용자 거짓 허용 = 모순. → narrowUnsafe + adapter actor 권장 (ADR-023). (Codex OV-10)
+- [strategy] 도그푸딩 미루기는 위험. 진짜 위험은 기능 누락이 아니라 _API 감각/cost model/supervision 의미_ 가 실제 코드에서 맞느냐. → M2 끝부터 ~1주 도그푸딩 (ADR-024). (Codex OV-6)
 - [process] 첫 plan-devex-review가 _문서 작성 자체에서도_ 도그푸딩 효과 발견. API.md 작성 중 closure 안티패턴이 _쓰는 도중_ 발견됨 → 5번 안티패턴 섹션 추가. _문서 작성도 도그푸딩이다_.
+
+### 2026-05-09 — plan-eng-review (M1 진입 직전)
+
+- [workflow] outside voice 를 _두 라운드_ 돌리는 게 가치 있다. round 1 결과를 _round 1 결정에 다시_ 돌려서 round 2 가 _10개 새 발견_ 짚음 (Critical 4 포함). _결정 자체에 대한 검증_ 이 _초기 발견 검증_ 만큼 중요.
+- [architecture] supervision 외피가 _완전 분리_ 가 아니라 _interpreter 와 같은 fiber 안 catchAll_. Akka ActorCell 도 광광 — supervisor + Behavior 둘 다 같은 cell 보유. 단순 분리 원리는 깰 수 있다. (ADR-020)
+- [architecture] watch 식별자는 _path-only 가 아니라 (path, uid)_ 여야 ABA 안전. ref 의 incarnation 만으로는 부족 — watchers TMap key 자체가 (path, uid) 조합 필요. (ADR-022)
+- [architecture] tell 의 _완전한 원자성_ 은 STM 으로도 어차피 못 얻는다 (mailbox 가 STM 밖). 그러므로 _best-effort delivery 명시_ 가 맞다 — Akka 도 같음. _송신 결과 표_ (stale/in-flight/fresh) 를 사용자에게 노출. (ADR-019)
+- [architecture] ref 가 cell 직접 보유 + UID 검증 = stable ref 의 본질. tell hot path lookup 0회. _stable ref = mailbox cell identity_ 정확한 정의. path lookup 강제 X. (ADR-019)
+- [architecture] Instance Scope 가 cleanup 의 _기본_, PostStop 이 _명시 hook_. 우선순위 명시가 _두 모델 공존_ 의미 정정. (ADR-021)
+- [architecture] Behavior 래퍼 (withMailbox/supervise/setup) 는 spawn 0단계에서 _벗겨져_ 메타 추출. 같은 패턴 적용. ADT 일관성 우선. (ADR-026)
+- [api] ActorSystem<RootMsg> generic 이 _첫 코드부터 타입 안전_ 보장. system.root.tell 이 컴파일타임 검증. Akka Typed 정통. (ADR-026)
+- [api] narrowUnsafe 이름 변경만으로는 _미봉_. adapter actor 패턴을 API.md 예제로 같이 박지 않으면 사용자는 그냥 캐스팅. _대안 명시_ 가 _경고_ 보다 효과적. (ADR-023)
+- [strategy] STM vs 시스템 명령 fiber — 둘 다 _구조적 안전_ 제공이지만 _학습 부담_ 측 시스템 fiber 가 단순. 0.x 단일 프로세스에서 STM 는 _과설계 가능성_ 이 있음. _결정 일관성_ 으로 STM 유지하지만 ARCHITECTURE.md 에 _비교_ 명시. (ADR-017)
+- [strategy] 도그푸딩 시점 _M3 끝_ 도 늦음. M1~M2 토대 (incarnation/cell ref/Scope/STM/setup) 가 _쓴 코드에서_ 진짜 동작하는지 _M2 끝_ 시점에 부딪혀야. ~1주 가벼운 도그푸딩 사이클이 _토대 검증_ 으로 의미. (ADR-024)
+- [process] 한 세션 안에서 _20개 결정_ 가능. Round 1 (10개) → outside voice → round 2 (10개) → 출력물. 한 결정 당 ~5분 + outside voice ~2분 = 약 2시간 세션. 결정 _뒤집지 않는_ 일관성 패턴 (예: STM 유지) 이 사용자 신뢰도와 균형.
 
 

@@ -42,18 +42,34 @@ type Behavior<Msg> = {
 
 직접 만드는 일은 거의 없다. `Behaviors.*` 빌더로 만든다.
 
-### 2.2 `ActorRef<Msg>`
+### 2.2 `ActorRef<Msg>` (ADR-016, ADR-019, ADR-023)
 
-액터의 논리 주소. 메시지 보내는 능력만.
+액터의 논리 주소 + 인스턴스 정체성 + cell 직접 접근. _stable ref_ 의 본질.
 
 ```typescript
 class ActorRef<Msg> {
   readonly path: ActorPath;
+  readonly uid: string;        // ADR-016: spawn 시 부여, ABA 방지
+  // (cell 은 internal — 사용자 직접 접근 X)
+
+  // Fire-and-forget — best-effort delivery (ADR-019)
+  // tell hot path: STM read-only tx 로 uid+status 검증 → cell.mailbox.offer
   tell(msg: Msg): Effect<void>;
+
   ask<Reply>(make: (replyTo: ActorRef<Reply>) => Msg, timeout: Duration): Effect<Reply>;
-  narrow<U extends Msg>(): ActorRef<U>;
+
+  // ⚠️ TypeScript 단순 캐스팅 — 런타임 검증 X.
+  // _권장 대안: §3.8 adapter actor 패턴_ (ADR-023).
+  narrowUnsafe<U extends Msg>(): ActorRef<U>;
 }
 ```
+
+**송신 결과 명시 (ADR-019, "best-effort delivery"):**
+- _stale ref_ (uid 불일치): dead letter
+- _in-flight stop_ (검증 후 enqueue 사이에 stop): 옛 cell 에 enqueue, 아무도 안 읽음 (의미적 소실)
+- _fresh_: enqueue 성공
+
+Akka 와 동일 — tell 은 _delivery 보장 안 함_. 사용자가 보장 원하면 명시 supervision 또는 ack 패턴.
 
 ### 2.3 `ActorContext<Msg>`
 
@@ -78,24 +94,22 @@ class ActorContext<Msg> {
 }
 ```
 
-### 2.4 `ActorSystem`
+### 2.4 `ActorSystem<RootMsg>` (ADR-026)
 
-전체 시스템. 보통 프로세스당 하나.
+전체 시스템. 보통 프로세스당 하나. **root 메시지 타입을 generic 으로 보존** (Akka Typed 정통).
 
 ```typescript
-class ActorSystem {
+class ActorSystem<RootMsg> {
   readonly name: string;
-  readonly root: ActorRef<???>;  // root guardian의 ref. 메시지 타입은 root behavior에 따라
+  readonly root: ActorRef<RootMsg>;  // root guardian. 첫 코드부터 타입 안전.
   readonly shutdown: Effect<void>;
 
-  static create<Msg>(root: Behavior<Msg>, name: string): Effect<ActorSystem>;
+  static create<RootMsg>(
+    root: Behavior<RootMsg>,
+    name: string
+  ): Effect<ActorSystem<RootMsg>>;
 }
 ```
-
-> ⚠️ `system.root` 의 타입 매개변수 처리는 미결. 후보:
-> - root behavior의 Msg 타입을 system 인스턴스에 그대로 살림 (`ActorSystem<Msg>`)
-> - root는 internal로 두고, 사용자는 `system.spawn(...)` 으로 직접 자식 만듦
-> 도그푸딩에서 결정.
 
 ### 2.5 `Behaviors` 빌더
 
@@ -125,6 +139,9 @@ const Behaviors: {
   empty<Msg>(): Behavior<Msg>;
   unhandled<Msg>(): Behavior<Msg>;
 
+  // Mailbox 정책 (ADR-018, ADR-026 — Behavior 래퍼 ADT)
+  withMailbox<Msg>(b: Behavior<Msg>, policy: MailboxPolicy): Behavior<Msg>;
+
   // 부가 도구
   withTimers<Msg>(f: (timers: Timers<Msg>) => Behavior<Msg>): Behavior<Msg>;
   withStash<Msg>(capacity: number, f: (stash: Stash<Msg>) => Behavior<Msg>): Behavior<Msg>;
@@ -132,6 +149,10 @@ const Behaviors: {
   // 감독
   supervise<Msg>(b: Behavior<Msg>): SuperviseBuilder<Msg>;
 };
+
+type MailboxPolicy =
+  | { _tag: "Unbounded" }                                    // ADR-018: 기본
+  | { _tag: "Bounded"; capacity: number; overflow: "backpressure" | "drop" | "fail" };
 
 type SuperviseBuilder<Msg> = {
   onFailure<E>(error: ErrorMatcher<E>, strategy: SupervisorStrategy): Behavior<Msg>;
@@ -413,6 +434,52 @@ const heartbeat = Behaviors.withTimers<HeartbeatMsg>((timers) =>
 
 타이머는 액터에 묶여있다. 액터가 stop되면 타이머도 자동 정리.
 
+### 3.8 Adapter actor — 부분 프로토콜 안전 노출 (ADR-023)
+
+`narrowUnsafe` 의 _권장 대안_. 메시지 변환 액터를 spawn 해서 외부에 _좁은 프로토콜_ 만 노출. 런타임 안전.
+
+```typescript
+type FullProtocol =
+  | { _tag: "Read" }
+  | { _tag: "Write"; data: string }
+  | { _tag: "AdminCommand"; cmd: string };
+
+type ReadOnlyProtocol = { _tag: "Read" };
+
+// 외부에는 ReadOnlyProtocol 만 보임. 잘못된 메시지는 컴파일 에러.
+const readOnlyAdapter = (
+  target: ActorRef<FullProtocol>
+): Behavior<ReadOnlyProtocol> =>
+  Behaviors.receiveMessage((msg) =>
+    target.tell(msg).pipe(Effect.as(Behaviors.same()))
+  );
+
+// 사용
+const program = Effect.gen(function* () {
+  const sys = yield* ActorSystem.create(database, "db");
+  const fullRef = sys.root;  // ActorRef<FullProtocol>
+
+  // 외부 모듈에 넘길 때
+  const readOnly = yield* sys.root.askContext.spawn(
+    readOnlyAdapter(fullRef),
+    "readonly-view"
+  );  // ActorRef<ReadOnlyProtocol>
+
+  // 외부 모듈은 readOnly.tell({ _tag: "Read" }) 만 가능
+  // readOnly.tell({ _tag: "Write", ... }) 는 컴파일 에러
+});
+```
+
+핵심:
+- 컴파일타임 _그리고_ 런타임 모두 안전 — adapter 가 _구조적으로_ 좁은 메시지만 받음.
+- 메시지 변환도 가능 (read-only adapter 가 다른 도메인 타입으로 변환할 수도).
+- 비용: actor 한 개 추가 spawn. 아주 hot path 가 아니면 무시할 수준.
+
+`narrowUnsafe` 와 비교:
+- `narrowUnsafe` 는 _캐스팅_ — 컴파일타임만, 런타임 X.
+- adapter 는 _진짜 actor_ — 컴파일+런타임 안전.
+- 권장: 부분 프로토콜 노출은 _adapter_ 우선.
+
 ---
 
 ## 4. 자주 쓰는 패턴
@@ -497,10 +564,13 @@ ActorRef는 _시스템이 발급_ 하는 것. 직접 만들면 registry와 어�
 
 이 섹션은 _시안_ 단계이며 도그푸딩 또는 구현 중 결정이 굳어지면 본문으로 옮기고 여기서 빼낸다.
 
-- `system.root` 의 타입 표현 방식 (위 2.4 참고)
-- 메일박스 capacity 기본값 (현재 시안: 1024 + backpressure)
+**처리된 항목 (2026-05-09 plan-eng-review):**
+- ✅ `system.root` 의 타입 → ADR-026 (`ActorSystem<RootMsg>` generic)
+- ✅ 메일박스 capacity 기본값 → ADR-018 (unbounded 기본 + 옵션)
+- ✅ `narrow` 의 형 안전성 → ADR-023 (`narrowUnsafe` + adapter actor 권장)
+
+**아직 미정:**
 - `ctx.spawnAnonymous` 의 이름 부여 규칙 (`$a`, `$b` … vs UUID)
-- `narrow` 의 형 안전성 보장 방법
 - 분산 시 ActorPath 표현 — 일단 단일 노드만 다루지만 path 형식은 미래 호환을 고려할지
 
 ---
