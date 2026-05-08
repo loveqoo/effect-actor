@@ -589,6 +589,39 @@ API.md §2.5 에 `Behaviors.withMailbox` 추가.
 
 ---
 
+## ADR-027: 툴체인 — pnpm + ESM + TypeScript 5 strict + vitest + tsx
+- 상태: accepted (잠정)
+- 일자: 2026-05-09
+- 출처: M1 사이클 0 — AGENTS.md §5.3 의 _M1 시작 전 결정_ 마무리
+
+### 맥락
+M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경을 박아야 한다. 후보:
+- 패키지 매니저: npm / pnpm / yarn / bun
+- 모듈: ESM / CJS / dual
+- 테스트: vitest / jest / node:test
+- 실행: tsx / ts-node / bun run
+
+선택 기준: EffectTS 생태계 친화도, 사용자(EffectTS 파워 유저) 익숙함, 향후 라이브러리 배포 (M∞) 호환성, 유지비 낮음.
+
+### 결정
+- **패키지 매니저: pnpm 11** (corepack 통해 고정. lock 파일 커밋).
+- **모듈: ESM** (`"type": "module"`). CJS dual export 는 M∞ 직전 빌드 도구로 결정.
+- **TypeScript 5 strict** + `exactOptionalPropertyTypes` + `noUncheckedIndexedAccess` + `verbatimModuleSyntax`.
+- **테스트: vitest + @effect/vitest** — Effect 런타임 통합 일급.
+- **실행: tsx** (examples 직접 실행, ESM .ts 지원).
+- **빌드 도구: 미정** — 라이브러리 배포가 필요해질 때 (M∞) 결정. 후보 tsup.
+- **포매터: prettier** (디폴트 설정).
+- **린터: 미정** — 처음부터 박지 않음. typecheck + 명시적 코드 리뷰로 충분. eslint 가 필요하면 후속 ADR.
+
+### 결과
+- (+) EffectTS 생태계 표준 조합. 사용자가 이미 익숙한 도구.
+- (+) M1 시작 전 _도구 결정 부담 0_. tsx 로 examples 즉시 실행, vitest 로 즉시 테스트.
+- (+) M∞ 배포 시 빌드 도구만 결정하면 됨 — pnpm publish 흐름 자체는 표준.
+- (-) bun (이미 설치됨) 의 단일 도구 (run + test + bundle) 이점 포기. EffectTS 1급 통합이 vitest 쪽이라 그쪽이 더 안전.
+- (-) lock 파일이 pnpm 전용. 사용자가 npm/yarn 으로 바꾸려면 변환 필요 — 다만 그럴 일 거의 없음.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

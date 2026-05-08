@@ -1,0 +1,33 @@
+# 의존성
+node_modules/
+.pnpm-store/
+
+# 빌드 산출물
+dist/
+build/
+*.tsbuildinfo
+
+# 테스트 / 커버리지
+coverage/
+.vitest-cache/
+
+# 에디터
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 환경
+.env
+.env.local
+.env.*.local
+
+# 로그
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*

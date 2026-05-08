@@ -12,7 +12,7 @@
 | 마일스톤 | 상태 | 목표 |
 |---|---|---|
 | M0. 정보 모으기 | 🟢 완료 | docs/ 묶음 작성. AGENTS.md 색인 |
-| M1. 최소 동작 + setup | ⚪ 대기 | spawn / tell / receive + setup (Stable ref + Mailbox 분리) |
+| M1. 최소 동작 + setup | 🟡 진행 중 | spawn / tell / receive + setup (Stable ref + Mailbox 분리) |
 | M2. Lifecycle | ⚪ 대기 | PostStop + 도그푸딩 시작 (ADR-024) |
 | M3. Stop + Watch | ⚪ 대기 | ctx.stop / watch / Terminated / ChildFailed |
 | M4. Restart | ⚪ 대기 | Supervision strategies (resume/restart/stop) |
@@ -77,11 +77,19 @@
 - Fiber lifecycle 과 entry status 동기화 (TRef)
 
 **마일스톤 완료 조건 (DoD):**
+- [x] _ARCHITECTURE 모순 없음_ — ADR-016~026 모두 반영 (2026-05-09 plan-eng-review)
 - [ ] `examples/01-counter.ts` — 단순 카운터 액터 + setup, `tsx` 로 실행 시 정상 출력
 - [ ] EffectTS Tagged Error 패턴 도입 (`ActorNotFound`, `IncarnationMismatch` — ADR-012, ADR-016)
 - [ ] tell hot path 가 cell direct (ADR-019)
 - [ ] STM tx 로 Registry/spawn/stop 정합성 (ADR-017)
-- [ ] _ARCHITECTURE 모순 없음_ — ADR-016~026 모두 반영 (2026-05-09 plan-eng-review)
+
+**진행 중인 사이클:**
+- 🟡 사이클 0 — 툴체인 셋업 (ADR-027): pnpm + ESM + TS5 strict + vitest + tsx
+- ⚪ 사이클 1 — 핵심 자료구조 (ActorPath, ActorRef, Cell, ActorEntry, Registry)
+- ⚪ 사이클 2 — Behavior ADT + 해석기 + Supervision 외피 (catchAll)
+- ⚪ 사이클 3 — Behaviors.receive / receiveMessage / setup / same / stopped + ActorContext
+- ⚪ 사이클 4 — ActorSystem<RootMsg> + spawn/tell/receive 통합
+- ⚪ 사이클 5 — examples/01-counter.ts 동작 + Tagged Error + 통합 테스트
 
 ---
 

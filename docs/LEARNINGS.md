@@ -55,4 +55,10 @@
 - [strategy] 도그푸딩 시점 _M3 끝_ 도 늦음. M1~M2 토대 (incarnation/cell ref/Scope/STM/setup) 가 _쓴 코드에서_ 진짜 동작하는지 _M2 끝_ 시점에 부딪혀야. ~1주 가벼운 도그푸딩 사이클이 _토대 검증_ 으로 의미. (ADR-024)
 - [process] 한 세션 안에서 _20개 결정_ 가능. Round 1 (10개) → outside voice → round 2 (10개) → 출력물. 한 결정 당 ~5분 + outside voice ~2분 = 약 2시간 세션. 결정 _뒤집지 않는_ 일관성 패턴 (예: STM 유지) 이 사용자 신뢰도와 균형.
 
+### 2026-05-09 — M1 사이클 0 (툴체인 셋업)
+
+- [tooling] pnpm 11 + corepack 으로 packageManager 핀. `"packageManager": "pnpm@11.0.8"` 한 줄로 팀 도구 통일. (ADR-027)
+- [tooling] TypeScript 5 strict 옵션 묶음에서 _자주 무는 곳_: `exactOptionalPropertyTypes` (optional 과 undefined 다름), `noUncheckedIndexedAccess` (배열/Record 접근이 `T | undefined`), `verbatimModuleSyntax` (type-only import 강제). 처음부터 박는 게 후속 수정 비용 < 추가 타입 부담.
+- [effect-ts] `@effect/vitest` 가 Effect 런타임 통합 일급 — `it.effect("name", () => Effect<...>)` 형태. 일반 vitest 의 `it` 안 Effect.runPromise 보다 깔끔. M1 사이클 1 부터 사용 예정.
+
 

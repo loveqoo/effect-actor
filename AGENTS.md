@@ -75,8 +75,8 @@
 
 ### 5.3 코드
 
-- TypeScript + EffectTS.
-- 패키지 매니저, 빌드 도구는 _아직 결정 안 됨_. M1 시작 전 결정.
+- TypeScript 5 strict + EffectTS 3.x. ESM (`"type": "module"`).
+- 패키지 매니저: pnpm 11 (corepack). 테스트: vitest + @effect/vitest. 실행: tsx. 빌드 도구는 M∞ 직전 결정. (ADR-027)
 - 코드 주석은 _왜_ 가 비명백할 때만. _무엇_ 은 코드가 말하게.
 - 한 사이클 안에 끝나는 단위로 커밋. 큰 PR 지양.
 
