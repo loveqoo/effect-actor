@@ -26,7 +26,7 @@ export interface ActorEntry<Msg> {
   readonly children: TRef.TRef<HashSet.HashSet<ActorPath>>;
   readonly watchers: TMap.TMap<WatchKey, WatchMessage>;
   readonly watching: TMap.TMap<WatchKey, WatchMessage>;
-  readonly fiber: TRef.TRef<Option.Option<Fiber.Fiber<unknown, never>>>;
+  readonly fiber: TRef.TRef<Option.Option<Fiber.Fiber<void, never>>>;
   readonly status: TRef.TRef<ActorStatus>;
   readonly scope: Scope.CloseableScope;
 }
@@ -43,9 +43,7 @@ const makeStm = <Msg>(args: {
     const children = yield* TRef.make(HashSet.empty<ActorPath>());
     const watchers = yield* TMap.empty<WatchKey, WatchMessage>();
     const watching = yield* TMap.empty<WatchKey, WatchMessage>();
-    const fiber = yield* TRef.make(
-      Option.none<Fiber.Fiber<unknown, never>>(),
-    );
+    const fiber = yield* TRef.make(Option.none<Fiber.Fiber<void, never>>());
     const status = yield* TRef.make<ActorStatus>("running");
     return {
       path: args.path,

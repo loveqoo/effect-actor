@@ -4,11 +4,10 @@ import { Cell } from "../src/mailbox.js";
 import { ActorPath } from "../src/path.js";
 import { ActorRef } from "../src/ref.js";
 import { ActorContext } from "../src/context.js";
+import { stubSystem } from "./helpers.js";
 
 const run = <A, E>(eff: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(eff);
-
-const stubSystem = { name: "test-sys" };
 
 describe("ActorContext.make", () => {
   it("self 와 system 보존", () =>

@@ -87,4 +87,13 @@
 - [api] Setup 한 겹만 풀음 — `init` 결과가 또 Setup 이면 _재평가 안 함_. Akka 정통 (Setup 의 결과가 시작 behavior). 중첩 Setup 은 사용자 의도가 흐려서 의미 없음. 사이클 5 도그푸딩에서 발견되면 ADR.
 - [process] 사이클 3 이 _가장 어려운 사이클_ 이라 했지만 _TDD + 잘게 쪼개기_ 로 ~30분에 끝남. 16 새 테스트, 누적 68. 사이클 1 의 _큰 한 번_ 보다 사이클 3 의 _작은 5번_ 이 _체감 부담 더 적음_.
 
+### 2026-05-09 — M1 사이클 4 (ActorSystem + root spawn + tell + shutdown)
+
+- [architecture] _system 과 root ref 의 cyclic dependency_ — ActorRef 가 system handle 보유, system 이 root ref 보유. 닭과 달걀. 해결: `handleRef: { ref: ... | null }` mutable 슬롯으로 _참조 슬롯_ 먼저 만들고 root spawn 후 채움. spawnRoot 내부의 race-free 한 곳 (모두 sync Effect 안). 도그푸딩에서 발견되면 _systemHandle deferred_ 같은 pattern 으로 정리.
+- [effect-ts] `Effect.forkIn(eff, scope)` 가 _scope 안에서 fork_. scope close 시 fiber 자동 interrupt + cleanup. shutdown 의 _fiber interrupt_ 명시 호출 불필요 — Scope.close 한 줄로 충분. ADR-021 의 instance Scope = 자동 cleanup 본질을 정확히 표현.
+- [effect-ts] `Fiber.await(fiber)` vs `Fiber.join` — await 은 interrupt 도 정상 받음, join 은 fail 채널로 던짐. shutdown 에서 _shutdown 끝 = fiber 끝_ 보장 위해 await 가 정확.
+- [api] `ActorSystem<RootMsg>` 가 `ActorSystemHandle` 을 _is-a_ 로 만족 — internal 표면 (tell) + 사용자 표면 (root, shutdown) 한 객체. 사용자가 `system.tell(ref, msg)` 직접 호출 가능 (지금은 _노출_). 사이클 5 또는 M2 에서 internal/external 분리 검토.
+- [api] tell 의 _STM read-only tx_: registry.resolve + entry.uid 검증 + status check. _enqueue 자체는 STM 밖_ (Queue.offer). ADR-019 의 _best-effort + 송신 결과 표_ 정확. 첫 통합에 stale ref + stopped 둘 다 silent dead letter 분기 검증.
+- [process] 사이클 4 가 _가장 큰 통합_ 이라 했는데, 사이클 3 의 _runInterpreter_ + 사이클 1/2 의 자료구조 + 메타 추출 모두 _준비된 상태_ 라 system.ts _한 파일_ 이 ~180줄. 복잡함은 _한 사이클에 압축_ 안 되고 _사이클 사이_ 에 분배됨. TDD 의 큰 통합 테스트 첫 Red 가 _남은 의존성 그림_ 한 번에 보여줌.
+
 

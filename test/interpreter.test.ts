@@ -7,11 +7,10 @@ import { interpretStep, runInterpreter } from "../src/interpreter.js";
 import { Cell } from "../src/mailbox.js";
 import { ActorPath } from "../src/path.js";
 import { ActorRef } from "../src/ref.js";
+import { stubSystem } from "./helpers.js";
 
 const run = <A, E>(eff: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(eff);
-
-const stubSystem = { name: "test-sys" };
 
 const makeCtx = <Msg>() =>
   Effect.gen(function* () {

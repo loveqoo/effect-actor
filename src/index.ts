@@ -41,3 +41,6 @@ export type { Behavior, BehaviorEffect, BehaviorMeta } from "./behavior.js";
 export { Behaviors, unwrapMeta } from "./behavior.js";
 
 export { interpretStep, runInterpreter } from "./interpreter.js";
+
+export type { ActorSystem } from "./system.js";
+export { ActorSystem as ActorSystemOps } from "./system.js";
