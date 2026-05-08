@@ -60,5 +60,14 @@
 - [tooling] pnpm 11 + corepack 으로 packageManager 핀. `"packageManager": "pnpm@11.0.8"` 한 줄로 팀 도구 통일. (ADR-027)
 - [tooling] TypeScript 5 strict 옵션 묶음에서 _자주 무는 곳_: `exactOptionalPropertyTypes` (optional 과 undefined 다름), `noUncheckedIndexedAccess` (배열/Record 접근이 `T | undefined`), `verbatimModuleSyntax` (type-only import 강제). 처음부터 박는 게 후속 수정 비용 < 추가 타입 부담.
 - [effect-ts] `@effect/vitest` 가 Effect 런타임 통합 일급 — `it.effect("name", () => Effect<...>)` 형태. 일반 vitest 의 `it` 안 Effect.runPromise 보다 깔끔. M1 사이클 1 부터 사용 예정.
+- [tooling] pnpm 11 의 `allowBuilds` 정책 — `esbuild` 등의 postinstall 이 _opt-in_. 첫 install 시 `pnpm-workspace.yaml` 자동 생성 후 `allowBuilds: { esbuild: true }` 박아야 fail 안 함. 한 번만 풀면 lock 파일에 박힘. (사이클 0 첫 막힘 지점)
+
+### 2026-05-09 — M1 사이클 1 (핵심 자료구조)
+
+- [effect-ts] `Data.struct` 의 Equal 은 _shallow_. nested 배열 deep equality 가 필요하면 `Data.array([...elements])` 로 감싸야 함. `ActorPath.elements` 가 이 케이스. (path.test.ts 첫 fail 에서 발견)
+- [effect-ts] STM 안에서는 `Queue` / `Scope` 생성 불가 (둘 다 Effect 자원). 패턴: Cell + Scope 는 Effect 안에서 미리 생성 → `STM.commit(makeStm({ ..., cell, scope }))` 로 합치기. ActorEntry.create 가 이 합성 본보기.
+- [effect-ts] `TMap` 키로 record 를 쓰려면 Equal/Hash 자동이 필요 — `Data.struct` 가 자동 부여. WatchKey = (path, uid) Data.struct 라 TMap 키로 안전. _cell 직접 비교 X, identity 는 (path, uid)_ 가 ADR-016/022 의 본질.
+- [api/?] ActorRef 를 `class` 아닌 `interface + 함수 묶음` (`ActorRef.equals(a, b)`) 으로 시작. 사이클 4 에서 사용자 표면을 method 식으로 (`ref.tell(msg)`) 결정할 때 wrap 가능. 함수형 시작이 EffectTS 정신과 일관.
+- [architecture] Registry 키는 _path 직렬화 string_ — TMap<string, ActorEntry<unknown>>. WatchKey 와 다름 (그쪽은 record). Equal/Hash 비용 회피 + 디버그 dump 직관 + path 가 시스템 안에서 unique. 두 자료구조의 키 선택이 _용도_ 에 따라 다른 게 깔끔.
 
 

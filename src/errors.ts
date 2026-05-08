@@ -1,0 +1,26 @@
+import { Data } from "effect";
+import type { ActorPath } from "./path.js";
+
+// ARCHITECTURE.md §4.5 — 최상위 에러 종류 (ADR-012).
+// 구체 메시지 어휘는 사이클별로 채움.
+
+// path 가 registry 에 없을 때 (tell/ask 등).
+export class ActorNotFound extends Data.TaggedError("ActorNotFound")<{
+  readonly path: ActorPath;
+}> {}
+
+// tell hot path 에서 entry.uid !== ref.uid 일 때 (ADR-016 ABA 차단).
+// dead letter 자동 처리 — 사용자 캐치 거의 없음.
+export class IncarnationMismatch extends Data.TaggedError(
+  "IncarnationMismatch",
+)<{
+  readonly path: ActorPath;
+  readonly expectedUid: string;
+  readonly actualUid: string;
+}> {}
+
+// bounded mailbox + overflow=fail 일 때.
+export class MailboxFull extends Data.TaggedError("MailboxFull")<{
+  readonly path: ActorPath;
+  readonly capacity: number;
+}> {}
