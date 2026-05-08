@@ -249,7 +249,38 @@ Supervision strategy가 restart로 결정된 경우:
 
 후보 A 우선. 사용자가 늘 ctx를 받는 시그니처라 명시적이고 추적 쉬움. 후속에 B를 _추가_ 옵션으로 제공 가능.
 
-### 4.4 Strategy DSL의 형태
+### 4.4 진단 출력 / 디버그 모드 (placeholder)
+
+> _F4 결정 (2026-05-08): 후크 자리만 잡아둠. 구체 설계는 M3-M4 사이클에서._
+
+사용자가 가장 자주 던지는 질문 _"왜 내 액터가 메시지를 안 받아요?"_ 에 답하기 위한 진단 도구.
+
+후보 진단 출력:
+- 액터별 mailbox depth (현재 큐 길이)
+- registry dump (path → 상태 매트릭스)
+- watch 그래프 (누가 누구를 watch 중)
+- 마지막 N개 메시지의 routing 추적
+
+지금은 자리만. 구현 모양은 M3 (watch 구현) 후 자연스러워질 때 결정.
+
+### 4.5 에러 종류 계층 (high level)
+
+> _F5 결정 (2026-05-08): 종류는 지금, 구체 어휘는 사이클별로._
+
+EffectTS Tagged Error 패턴으로 표현. 최상위 에러 종류 초안:
+
+| 에러 종류 | 발생 시점 | 예상 처리 |
+|---|---|---|
+| `ActorNotFound` | tell / ask 시 path가 registry에 없음 | dead letter 또는 사용자 캐치 |
+| `MailboxFull` | bounded mailbox 용량 초과 (ADR-008 참고) | backpressure로 suspend 또는 drop |
+| `AskTimeout` | ask 응답이 지정 시간 내 안 도착 | 사용자 캐치 |
+| `DeathPactException` | watch 했는데 Terminated 미처리 → 자기도 실패 | supervision으로 catch |
+| `StashOverflow` | withStash 용량 초과 | supervision 대상 |
+| `IncarnationMismatch` | (M1 후보) ref가 stale incarnation을 가리킴 | Outside Voice 1번 발견 — M1 결정 대기 |
+
+구체 메시지 어휘 (텍스트, 권장 fix, 문서 링크 등) 는 _관련 패스의 사이클_ 에서 확정. 예: ActorNotFound는 M1 첫 사이클에서, AskTimeout은 M3 사이클에서.
+
+### 4.6 Strategy DSL의 형태
 
 ```typescript
 // 후보 1: chained
@@ -266,6 +297,19 @@ Behaviors.supervise(b, {
 ```
 
 Akka 모양과 일치하는 후보 1로 우선 진행.
+
+### 4.7 Outside Voice 발견 — 미해결 (M1 시작 전 plan-eng-review 대상)
+
+2026-05-08 Codex outside voice가 짚은 _근본_ 결정 5개. 모두 ARCHITECTURE 재설계 수준. **M1 시작 전 별도 plan-eng-review 세션에서 일괄 결정.** 자세한 항목은 [PLAN.md § OUTSIDE VOICE FINDINGS](./PLAN.md#outside-voice-findings) 참고.
+
+요약:
+- **OV-1.** ActorRef에 incarnation UID 추가 (현재 path-only는 ABA 위험)
+- **OV-2.** Signal 흐름 재설계 (PreRestart/PostStop 누가/어디서 처리)
+- **OV-4.** Registry/children/watchers/fiber/status 트랜잭션 경계 (STM 도입 여부)
+- **OV-5.** Restart 시 handler 내부 부작용(fork/timer 등) 정리 범위 명시
+- **OV-8.** watchWith 자료구조 명시 (현재 `Set<ActorPath>` 로는 불가)
+
+이 5개가 _해결_ 되기 전에는 본 ARCHITECTURE.md의 §3 데이터 흐름 일부가 _불완전_ 한 상태임을 명시.
 
 ---
 

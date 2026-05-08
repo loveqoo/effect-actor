@@ -64,6 +64,13 @@
 - Mailbox 정책 (capacity, backpressure) 확정 (ADR-008 잠정)
 - Fiber lifecycle과 entry status 동기화
 
+**마일스톤 완료 조건 (DoD):** _ADR-011 적용._
+- [ ] `examples/01-counter.ts` — 단순 카운터 액터, `tsx` 로 실행 시 정상 출력
+- [ ] EffectTS Tagged Error 패턴 도입 (`ActorNotFound` 정의 — _ADR-012_)
+- [ ] _Outside Voice 발견(OV-1, 2, 4, 5, 8) 모두 plan-eng-review 에서 결정 끝났음_
+
+> ⚠️ **M1 진입 전 결정 필요:** ADR-014 (도그푸딩 시점), ADR-015 (M1 범위 확장 여부). plan-eng-review 세션에서 처리.
+
 ---
 
 ## M2. Lifecycle
@@ -170,6 +177,9 @@
 - npm 패키지 이름 결정 (`@loveqoo/effect-actor` 후보)
 - 첫 배포 직전 `/devex-review`, `/codex review`, `/health` 통과
 - README / CHANGELOG / docs 영어판 (비공식적으로는 한국어 docs를 그대로 두되, 영어 README는 별도)
+- **semver 정책 확정** (현재 미정 — F6 결정에 따라 M∞ 직전에 ADR로 박음. 후보: `0.x = minor가 breaking, patch는 fix-only / 1.0+ = SemVer`)
+- 영어 README 작성 (한국어 docs/는 그대로)
+- CONTRIBUTING.md / ISSUE_TEMPLATE / PR template 추가
 
 ---
 
@@ -195,3 +205,101 @@
 - 마일스톤 상태 표기 (🟢/🟡/🔴/⚪)는 사이클 끝마다 갱신.
 - 마일스톤이 시작되면 _도전 과제_ 항목들이 사이클의 todo 후보가 된다.
 - 마일스톤 _완료 정의(DoD)_ 가 모호하면 첫 사이클 시작 전에 명시화.
+
+---
+
+## OUTSIDE VOICE FINDINGS
+
+> 2026-05-08 plan-devex-review 세션에서 Codex outside voice가 짚은 발견 10개.
+> 모두 _M1 시작 전 별도 plan-eng-review 세션_ 에서 본격 결정.
+> 이 섹션은 _발견을 흘리지 않기 위한 그물_. 결정 끝난 항목은 ADR로 옮기고 여기서 빼낸다.
+
+| # | 등급 | 영역 | 발견 |
+|---|---|---|---|
+| OV-1 | 🔴 Critical | ARCHITECTURE 2.2/2.3/3.4, API 2.2 | ActorRef가 path만 들고 incarnation 개념 없음 → ABA 버그. 액터 재spawn 시 옛 ref가 새 액터 가리킴. 단일 프로세스에서도 안전하지 않음. |
+| OV-2 | 🔴 Critical | ARCHITECTURE 3.5/3.6/5 | PreRestart/PostStop 흐름 모순. supervision 래퍼가 해석기 _밖_ 인데 PreRestart를 _현재 behavior_ 가 처리한다고 적힘. 실패 시점에 해석 루프 깨짐. |
+| OV-3 | 🟡 Important | DECISIONS ADR-008 | bounded mailbox + backpressure 기본값이 tell의 fire-and-forget 깸. AI/agent burst 워크로드에서 sender suspend → 그래프 정지. ADR-008 재고. |
+| OV-4 | 🔴 Critical | ARCHITECTURE 2.3/2.4/3.1/3.6 | Registry/children/watchers/fiber/status 여러 Ref 분리. 트랜잭션 경계 없음 → 중간 실패/경합에서 찢어진 상태. STM 거의 필수. |
+| OV-5 | 🔴 Critical | ARCHITECTURE 3.5, PLAN M4, API 3.2/3.5 | Mailbox 보존 restart의 가정이 _handler가 순수한 한 개 effect_ 라고 깔고 있음. Effect 사용자는 fork/timer/scoped resource 쉽게 만듦 → 부작용 누수 위에 메시지만 재처리하는 반쯤 망가진 restart 위험. |
+| OV-6 | 🟡 Strategy | DECISIONS ADR-004, PLAN M∞ | 도그푸딩 미루기 = 전략 오류. 진짜 위험은 기능 누락이 아니라 _API 감각/cost model/supervision 의미_ 가 실제 코드에서 맞느냐. ADR-014 (제안) 로 재고. |
+| OV-7 | 🟡 Strategy | PLAN M1~M4, API 전체 | M1=spawn/tell/receive 만으론 Competitive TTHW 목표(2-5분)에서 _Nact 대신 쓸 이유_ 안 보임. ADR-015 (제안) 로 M1 범위 확장 검토. |
+| OV-8 | 🔴 Critical | ARCHITECTURE 2.3/3.4, API 2.3/3.4 | watchWith 데이터 모델 미정. `watchers: Set<ActorPath>` 로는 "누가 어떤 메시지로 변환해서 감시 중" 표현 불가. 중복 watch / unwatch semantics 미정. |
+| OV-9 | 🟡 Important | DECISIONS ADR-002, ARCHITECTURE 2.2/3.2 | Path-string lookup hot path 비용 + 과설계. Stable ref의 본질은 mailbox cell identity 유지지 path lookup 강제 아님. 단일 프로세스 0.x에선 더 단순 가능. |
+| OV-10 | 🟡 Important | API 2.2/6, PLAN M1 | `narrow<U extends Msg>()` 가 TypeScript 단순 캐스팅. 라이브러리가 supervision/lifecycle은 강제하면서 타입 안전성에선 무력. selling point로 어려움. |
+
+**관련 ADR:**
+- ADR-014 (제안): ADR-004 (도그푸딩 시점) 재고 — OV-6 대응
+- ADR-015 (제안): M1 범위 확장 — OV-7 대응
+- 나머지 OV-1, 2, 3, 4, 5, 8, 9, 10 은 _M1 시작 전 plan-eng-review_ 에서 ADR-016~ 로 박힐 예정
+
+---
+
+## DX SCORECARD (2026-05-08, plan-devex-review POLISH 모드)
+
+```
++============================================================================+
+|              DX PLAN REVIEW — SCORECARD                                     |
++============================================================================+
+| Dimension            | 현재     | F1-F6+M1 후 | M5+M∞ 후                  |
+|----------------------|----------|-------------|---------------------------|
+| Getting Started      | 3/10     | 8/10        | 8/10                      |
+| API/CLI/SDK 설계     | 7/10     | 7/10        | 9/10 (잠정 결정 확정)     |
+| Error Messages       | 2/10     | 6/10        | 8/10 (구체 어휘 확정)     |
+| Documentation        | 7/10     | 7/10        | 8/10 (영어 README)        |
+| Upgrade Path         | 3/10     | 3/10        | 7/10 (semver + CHANGELOG) |
+| Dev Environment      | 4/10     | 8/10        | 8/10                      |
+| Community            | 2/10     | 3/10        | 7/10 (CONTRIBUTING 등)    |
+| DX Measurement       | 3/10     | 3/10        | 5/10                      |
++----------------------------------------------------------------------------+
+| TTHW                 | N/A      | ~3 min      | ~3 min                    |
+| Competitive Rank     | (no code)| Competitive | Competitive               |
+| Magical Moment       | placeholder|README before/after | examples 동작 보강     |
+| Product Type         | Library/SDK (TypeScript, EffectTS-based)            |
+| Mode                 | POLISH                                              |
+| Persona              | EffectTS 파워 유저, agent/AI 빌더                   |
+| Overall DX           | 3.9/10   | 5.6/10      | 7.5/10                    |
++============================================================================+
+| DX 원칙 커버리지 (F1-F6+M1 후 기준)                                         |
+| Zero Friction        | covered (스케치 README + examples/)                 |
+| Learn by Doing       | covered (실행 가능 examples/)                       |
+| Fight Uncertainty    | partial (에러 종류만, 구체 어휘는 사이클별)         |
+| Opinionated + Escape | covered (Akka Typed 모양 + EffectTS escape)         |
+| Code in Context      | covered (API.md 7개 예시)                           |
+| Magical Moments      | covered (M1 후 README before/after 등장)            |
++============================================================================+
+```
+
+**리뷰 결과 요약:**
+- 현재 평균 ~3.9/10. 코드 부재 + README 부재 + examples 부재가 대부분 차감.
+- F1-F6 결정 + M1 셋업 완료 후 ~5.6/10. _Outside Voice 발견_ 들이 plan-eng-review에서 풀리고 M1이 끝나면 정확 측정 가능.
+- M5+M∞ 후 ~7.5/10. 0.x 범위에서는 합리적 상한.
+- **블로커:** Outside Voice OV-1~5, OV-8 (Critical 5개). M1 진입 전 plan-eng-review에서 결정 안 되면 ARCHITECTURE.md가 _틀린 상태로_ 코드 작성 시작.
+
+**처리된 결정 (이 세션):**
+- F1: 스케치 README 지금 (✅ README.md 작성 완료)
+- F3: M1부터 examples/ 동작 (✅ ADR-011)
+- F4: 디버그 모드 placeholder만 (✅ ARCHITECTURE.md §4.4)
+- F5: 에러 종류 ARCHITECTURE에, 어휘 사이클별 (✅ ADR-012)
+- F6: semver M∞ 직전 (✅ PLAN.md M∞ 노트)
+
+**미처리 결정 (plan-eng-review 이관):**
+- OV-1, 2, 3, 4, 5, 8, 9, 10 (8개)
+- ADR-014 (도그푸딩 시점 재고)
+- ADR-015 (M1 범위 확장)
+
+---
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | 범위 & 전략 | 0 | — | — |
+| Codex Review | `/codex review` | 독립 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | 아키텍처 & 테스트 (필수) | 0 | — | — |
+| Design Review | `/plan-design-review` | UI/UX (해당 없음, 라이브러리) | 0 | n/a | n/a |
+| DX Review | `/plan-devex-review` | 개발자 경험 | 1 | issues_found | overall 3.9/10 → 5.6 (예상). Critical 5개는 plan-eng-review로 이관. F1-F6 처리됨. |
+
+- **OUTSIDE VOICE (Codex):** 1회 실행 — 10개 발견(Critical 5, Important/Strategy 5). 모두 plan-eng-review로 이관.
+- **CROSS-MODEL:** Codex와 Claude의 발견은 _상충하지 않고 보완_. Claude는 DX 표면(README, examples, 에러 어휘) 짚고, Codex는 아키텍처 근본(incarnation, signal 흐름, 트랜잭션 경계, 부작용 누수, watchWith 자료구조) 짚음.
+- **UNRESOLVED:** 8 항목 (OV-1, 2, 3, 4, 5, 8, 9, 10) + ADR-014, ADR-015.
+- **VERDICT:** DX Review 1회 완료. **Eng Review 필요 (M1 진입 전 필수)** — 미실행. 따라서 _NOT CLEARED for M1 코딩_.
