@@ -70,4 +70,12 @@
 - [api/?] ActorRef 를 `class` 아닌 `interface + 함수 묶음` (`ActorRef.equals(a, b)`) 으로 시작. 사이클 4 에서 사용자 표면을 method 식으로 (`ref.tell(msg)`) 결정할 때 wrap 가능. 함수형 시작이 EffectTS 정신과 일관.
 - [architecture] Registry 키는 _path 직렬화 string_ — TMap<string, ActorEntry<unknown>>. WatchKey 와 다름 (그쪽은 record). Equal/Hash 비용 회피 + 디버그 dump 직관 + path 가 시스템 안에서 unique. 두 자료구조의 키 선택이 _용도_ 에 따라 다른 게 깔끔.
 
+### 2026-05-09 — M1 사이클 2 (Behavior ADT + 빌더 + unwrapMeta)
+
+- [process] TDD 첫 사이클 효과 — _Red 단계_ 가 _ActorContext placeholder 의 필요성_ 을 미리 발견. 테스트가 `import type { ActorContext }` 를 요구하니 _구현 전_ 에 빈 interface 를 짜야 했음. 이 forward-declare 방식이 사이클 3 에서 자연 채워짐 — invariant 가 흐려지지 않음.
+- [api] `Behaviors.receiveMessage(handle)` 는 내부적으로 `Receive` ADT 로 풀림 — `(_ctx, msg) => handle(msg)`. 사용자 표면은 두 빌더, 내부 표현은 한 케이스. 해석기 단순.
+- [architecture] `unwrapMeta` 는 _가장 바깥_ WithMailbox 만 채택 (Akka semantics). 안쪽 WithMailbox 는 inner 안에 그대로 — 시작 behavior 가 보유. 중첩 시 안쪽이 무시되는 것 _아님_ — _밖에서 본 mailbox 가_ 안쪽 정책 가림. 해석 루프 의 시작 behavior 는 _안쪽 래퍼 그대로_.
+- [effect-ts] mailbox.ts 의 `export type MailboxPolicy = ... ; export const MailboxPolicy = { ... }` — type + const 같은 이름. 한 import 로 type + value 둘 다 참조 가능. verbatimModuleSyntax 도 OK. 라이브러리 코드 import 패턴 표준화.
+- [tooling] TS 의 `noUnusedParameters` + variance annotation — phantom Msg 가 union 의 _어떤 케이스에도 안 나오면_ unused. 해결: Receive/Setup 추가하면 자연 등장. 사이클 2 의 종결자만 있는 단계에서는 `_Msg` prefix 또는 placeholder 케이스 추가. 다음 사이클 추가 시 자연 정리.
+
 

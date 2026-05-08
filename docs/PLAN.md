@@ -86,10 +86,10 @@
 **진행 중인 사이클:**
 - 🟢 사이클 0 — 툴체인 셋업 (ADR-027): pnpm + ESM + TS5 strict + vitest + tsx
 - 🟢 사이클 1 — 핵심 자료구조 (ActorPath, Signal/WatchKey/WatchMessage, Cell, Errors, ActorEntry, Registry, ActorRef identity) + 39 테스트
-- 🟡 사이클 2 — Behavior ADT + 해석기 + Supervision 외피 (catchAll)
-- ⚪ 사이클 3 — Behaviors.receive / receiveMessage / setup / same / stopped + ActorContext
-- ⚪ 사이클 4 — ActorSystem<RootMsg> + spawn/tell/receive 통합 + ActorRef.tell 부착
-- ⚪ 사이클 5 — examples/01-counter.ts 동작 + Tagged Error + 통합 테스트
+- 🟢 사이클 2 — Behavior ADT (Same/Stopped/Empty/Unhandled/Receive/Setup/WithMailbox) + Behaviors 빌더 + unwrapMeta (ADR-026 sync 메타 추출) + 13 테스트 (TDD Red→Green→Refactor)
+- 🟡 사이클 3 — ActorContext (self/log/spawn placeholder) + 해석 루프 + signal 우선순위 + Supervision 외피 (default stop)
+- ⚪ 사이클 4 — ActorSystem<RootMsg> + spawn dispatch + ActorRef.tell + system.shutdown
+- ⚪ 사이클 5 — examples/01-counter.ts 동작 + 통합 테스트
 
 ---
 

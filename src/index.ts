@@ -33,3 +33,8 @@ export { Registry as RegistryOps } from "./registry.js";
 
 export type { ActorRef, ActorSystemHandle } from "./ref.js";
 export { ActorRef as ActorRefOps } from "./ref.js";
+
+export type { ActorContext } from "./context.js";
+
+export type { Behavior, BehaviorMeta } from "./behavior.js";
+export { Behaviors, unwrapMeta } from "./behavior.js";
