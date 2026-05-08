@@ -4,7 +4,7 @@ import { Cell } from "../src/mailbox.js";
 import { ActorPath } from "../src/path.js";
 import { ActorRef } from "../src/ref.js";
 import { ActorContext } from "../src/context.js";
-import { stubSystem } from "./helpers.js";
+import { stubSpawn, stubSystem } from "./helpers.js";
 
 const run = <A, E>(eff: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(eff);
@@ -21,7 +21,11 @@ describe("ActorContext.make", () => {
           cell,
           system: stubSystem,
         });
-        const ctx = ActorContext.make({ self, system: stubSystem });
+        const ctx = ActorContext.make({
+          self,
+          system: stubSystem,
+          spawn: stubSpawn,
+        });
         expect(ctx.self).toBe(self);
         expect(ctx.system).toBe(stubSystem);
       }),

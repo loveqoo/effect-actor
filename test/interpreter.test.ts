@@ -7,7 +7,7 @@ import { interpretStep, runInterpreter } from "../src/interpreter.js";
 import { Cell } from "../src/mailbox.js";
 import { ActorPath } from "../src/path.js";
 import { ActorRef } from "../src/ref.js";
-import { stubSystem } from "./helpers.js";
+import { stubSpawn, stubSystem } from "./helpers.js";
 
 const run = <A, E>(eff: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(eff);
@@ -17,7 +17,7 @@ const makeCtx = <Msg>() =>
     const path = ActorPath.child(ActorPath.root("test-sys"), "x");
     const cell = yield* Cell.make<Msg>();
     const self = ActorRef.make({ path, uid: "u", cell, system: stubSystem });
-    return ActorContext.make({ self, system: stubSystem });
+    return ActorContext.make({ self, system: stubSystem, spawn: stubSpawn });
   });
 
 describe("interpretStep — 종결자 transition", () => {
@@ -155,7 +155,11 @@ const makeEntryAndCtx = <Msg>(uid: string = "u") =>
       cell: entry.cell,
       system: stubSystem,
     });
-    const ctx = ActorContext.make<Msg>({ self, system: stubSystem });
+    const ctx = ActorContext.make<Msg>({
+      self,
+      system: stubSystem,
+      spawn: stubSpawn,
+    });
     return { entry, ctx };
   });
 

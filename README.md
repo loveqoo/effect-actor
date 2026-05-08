@@ -7,9 +7,9 @@
 | 항목 | 상태 |
 |---|---|
 | 버전 | 0.0.0 (미배포) |
-| 마일스톤 | M0 완료 / M1 진행 예정 |
+| 마일스톤 | M0/M1 완료 / M2 진행 예정 |
 | npm 패키지 | _M5+ 도그푸딩 후 배포 예정_ |
-| 코드 | _M1 시작 전. 현재는 설계 문서만._ |
+| 코드 | _M1: spawn / tell / receive + setup + ctx.spawn 동작. examples/01-counter 실행 가능._ |
 
 ## 무엇인가
 
@@ -44,8 +44,8 @@ _실제 동작 코드는 M1 마일스톤 완료 시 [examples/01-restart-demo.ts
 | | 상태 | 무엇이 가능해지나 |
 |---|---|---|
 | M0 | 🟢 완료 | 설계 문서, ADR, 마일스톤 게시판 |
-| M1 | ⚪ 대기 | spawn / tell / receive (stable ref + mailbox 분리) |
-| M2 | ⚪ 대기 | setup / PostStop 신호 |
+| M1 | 🟢 완료 | spawn / tell / receive + setup + ctx.spawn (stable ref + mailbox 분리). 77 테스트, examples/01 동작 |
+| M2 | ⚪ 다음 | PostStop 신호 + 도그푸딩 시작 (poly-phony agent ~1주, ADR-024) |
 | M3 | ⚪ 대기 | watch / Terminated / ask 패턴 |
 | M4 | ⚪ 대기 | Supervision (resume/restart/stop) |
 | M5 | ⚪ 대기 | Backoff / Stash / Timer |

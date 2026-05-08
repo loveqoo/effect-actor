@@ -1,46 +1,38 @@
 // effect-actor — EffectTS 기반 Akka Typed 스타일 Actor
 //
-// M1 사이클 1 (현재): 핵심 자료구조 — identity 와 컨테이너만.
-// 동작 (Behavior 해석기, spawn, tell dispatch) 은 다음 사이클부터.
+// M1 완성: spawn / tell / receive + setup + ctx.spawn + supervision 외피 default stop.
+// M2 부터 PostStop / 도그푸딩, M3 부터 watch / ask, M4 supervision strategies, M5 backoff/stash/timer.
 
-export type { ActorPath } from "./path.js";
-export { ActorPath as ActorPathOps } from "./path.js";
+// 식별자
+export { ActorPath } from "./path.js";
 
-export type { Signal, WatchKey, WatchMessage } from "./signal.js";
-export {
-  Signal as SignalOps,
-  WatchKey as WatchKeyOps,
-  WatchMessage as WatchMessageOps,
-} from "./signal.js";
+// 신호 + watch
+export { Signal, WatchKey, WatchMessage } from "./signal.js";
+export { ActorStatus } from "./status.js";
 
-export type { ActorStatus } from "./status.js";
-export { ActorStatus as ActorStatusOps } from "./status.js";
+// 메일박스
+export { Cell, MailboxPolicy } from "./mailbox.js";
 
-export type { Cell, MailboxPolicy } from "./mailbox.js";
-export { Cell as CellOps, MailboxPolicy as MailboxPolicyOps } from "./mailbox.js";
-
+// 에러 (Tagged)
 export {
   ActorNotFound,
   IncarnationMismatch,
   MailboxFull,
 } from "./errors.js";
 
-export type { ActorEntry } from "./entry.js";
-export { ActorEntry as ActorEntryOps } from "./entry.js";
+// 내부 자료구조 (사용자 직접 접근은 거의 없음)
+export { ActorEntry } from "./entry.js";
+export { Registry } from "./registry.js";
 
-export type { Registry } from "./registry.js";
-export { Registry as RegistryOps } from "./registry.js";
+// ref / context
+export { ActorRef } from "./ref.js";
+export type { ActorSystemHandle } from "./ref.js"; // internal handle (사용자 표면 X)
+export { ActorContext } from "./context.js";
 
-export type { ActorRef, ActorSystemHandle } from "./ref.js";
-export { ActorRef as ActorRefOps } from "./ref.js";
-
-export type { ActorContext } from "./context.js";
-export { ActorContext as ActorContextOps } from "./context.js";
-
+// behavior + 해석기
 export type { Behavior, BehaviorEffect, BehaviorMeta } from "./behavior.js";
 export { Behaviors, unwrapMeta } from "./behavior.js";
-
 export { interpretStep, runInterpreter } from "./interpreter.js";
 
-export type { ActorSystem } from "./system.js";
-export { ActorSystem as ActorSystemOps } from "./system.js";
+// system (사용자 entry point)
+export { ActorSystem } from "./system.js";

@@ -96,4 +96,12 @@
 - [api] tell 의 _STM read-only tx_: registry.resolve + entry.uid 검증 + status check. _enqueue 자체는 STM 밖_ (Queue.offer). ADR-019 의 _best-effort + 송신 결과 표_ 정확. 첫 통합에 stale ref + stopped 둘 다 silent dead letter 분기 검증.
 - [process] 사이클 4 가 _가장 큰 통합_ 이라 했는데, 사이클 3 의 _runInterpreter_ + 사이클 1/2 의 자료구조 + 메타 추출 모두 _준비된 상태_ 라 system.ts _한 파일_ 이 ~180줄. 복잡함은 _한 사이클에 압축_ 안 되고 _사이클 사이_ 에 분배됨. TDD 의 큰 통합 테스트 첫 Red 가 _남은 의존성 그림_ 한 번에 보여줌.
 
+### 2026-05-09 — M1 사이클 5 (ctx.spawn + examples/01-counter + DoD 검증)
+
+- [architecture] spawnRoot → spawnInternal 일반화 — root 와 child 의 차이는 _parentEntry_ 한 인자뿐. ARCHITECTURE.md §3.1 의 0-10 단계가 root/child 동일. _자기 자식 부모 트리_ 는 STM tx 안의 children TMap 갱신 한 줄.
+- [api] `ActorContext.spawn` 의 시그니처: `(behavior, name) => Effect<ActorRef<ChildMsg>>`. ctx 만들 때 system 이 _자기 자신을 부모 entry 와 묶어_ spawn 함수를 채움. ctx 객체가 _self entry 의 spawn 권한_ 보유.
+- [tooling] `verbatimModuleSyntax` + 같은 이름의 `interface X` + `const X` — `export { X }` 한 줄로 type+value 둘 다 export. `export type { X }` + `export { X }` 두 줄은 _Duplicate identifier_ 충돌. 단일 export 가 정답.
+- [api] index.ts 의 `XOps` 별칭 모두 제거 — 사용자 표면이 깔끔해짐 (`ActorPath`, `Behaviors`, `ActorSystem` 같이 자연 import). `ActorSystemHandle` 만 `export type` 으로 남겨 _internal 권장_ 표시. 사용자가 `import type` 안 하고 사용해도 안전하지만 의도 전달.
+- [process] M1 5 사이클 전체 회고 — 사이클 0 (셋업) → 1 (자료구조 39테) → 2 (ADT 13테) → 3 (해석기 16테) → 4 (통합 6테) → 5 (ctx.spawn + examples 3테). _각 사이클이 다음 사이클의 기반_ 이라 의존성 깊이가 자연 증가. TDD 가 _각 사이클의 의도를 테스트로 박는_ 일관 도구. 누적 77 테스트, examples 동작.
+
 
