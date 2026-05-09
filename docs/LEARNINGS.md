@@ -247,6 +247,22 @@
 - [api] cycle 5 의 sibling LIFO 순서 — 정상 cascade 흐름은 _Akka 정통_ (마지막 spawn 자식부터 stop). ADR-031 결정 단계에 _명시 안 박힘_ — fix 사이클에서 ADR-031 보강 + 테스트로 명시.
 - [process] 도그푸딩 #2 _가치 검증_ — 5 사이클 / 9 테스트 / 1 BUG 발견. ADR-024 의 _토대 검증_ 정신 그대로. wrapper 3종 의 도메인 부담 5-10줄 데이터, factory 패턴 표준 확정, spawn race 의 production 위험 — 모두 _코드 작성 안 했으면_ 못 잡았을 입력.
 
+### 2026-05-09 — 도그푸딩 #2 사이클 5 BUG 후속 검증 (consumer 측)
+
+- [runtime] poly-phony cascade.test.ts 의 100ms grace window 제거 후 통과 (9ms, 5회 flake-free). spawn 직후 sys.shutdown 호출해도 cascade 가 children setup 완료까지 기다린 뒤 depth-first PostStop 발사 (`child:a:setup → child:b:setup → child:b:poststop → child:a:poststop → root`). spawn happens-before contract 가 production 시점에서도 정상.
+- [process] consumer 분석 (_"STM transaction 경계 미흡"_) 은 _부분적으로만_ 맞음. 실제 root cause 는 두 layer:
+  1. spawn happens-before 부재 — STM 과 별개, fiber fork 후 Setup 평가 완료 await 안 함. Deferred latch 로 fix.
+  2. Effect 3.21.2 `TMap.remove` 본체 버그 — `Chunk.partition` 술어 자리 잘못, hash 충돌 bucket 전부 비움. 우리 Registry 키들이 같은 bucket 으로 떨어져 cascade silent skip 야기. STM tx 자체는 atomic 했음, 그 _안의_ TMap.remove 가 broken.
+  - (1) 만 fix 했으면 cascade 는 여전히 silent skip. consumer 가 라이브러리 내부 안 보니 (1) layer 로 추론한 건 자연스럽고 합리적 — _abstraction leak_ 의 사례. _라이브러리 잣대로 재해석_ 의 ADR-028 정신 그대로 (consumer 추론 채택 X, 우리 측 실측 채택).
+- [tooling] **도그푸딩의 _진짜 가치_** — consumer lifecycle race 시나리오 (spawn → shutdown → cleanup) 가 라이브러리 격리 테스트가 못 잡는 BUG 를 surface. 라이브러리 측 system.test.ts 는 _spawn 후 sleep → shutdown_ 패턴이 default 였고, _즉시 shutdown_ 케이스가 없었음. consumer 가 _당연한 사용 시나리오_ 로 자연 노출 → 라이브러리 측 spawn race fix 사이클로 환류.
+- [process] M3.1 사이클 1 의 입력 → 결과 흐름:
+  - 입력: poly-phony 측 100ms grace 우회 보고 (도그푸딩 #2 cycle 5)
+  - 진단 (consumer): STM 경계 추측
+  - 진단 (라이브러리 측 실측): (a) latch + (b) TMap.remove 버그 두 layer
+  - 후속: latch + Chunk LIFO + TMap → TRef<HashMap> 우회 (사용자 표면 변경 0)
+  - 검증 (consumer): grace 제거 후 9ms / 5회 flake-free 통과
+- [api] 사용자 표면 변경 없음 — `ctx.spawn` 시그너처 동일, `sys.shutdown` 의미 동일. 내부 구현만 강화. 도그푸딩 측 코드 한 줄도 안 바꾸고 fix 검증.
+
 ### 2026-05-09 — M3.1 사이클 1 (spawn race fix + Effect TMap 버그 발견)
 
 - [runtime] spawn happens-before 보장은 _Deferred latch_ 한 줄로 깔끔. spawnInternal 안에서 `Deferred.make<void, never>` → runInterpreter 가 evaluateInitial 후 `Deferred.succeed` → spawnInternal 의 `Deferred.await(latch)` 로 마감. Setup 평가 도중 fail 도 supervision 외피 catchAllCause 안에서 latch.succeed 보장 → 영원 await 불가. 재귀 spawn (Setup 안 ctx.spawn) 도 같은 보장 자동 전파.
