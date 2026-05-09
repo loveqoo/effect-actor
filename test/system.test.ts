@@ -1154,3 +1154,89 @@ describe("M4.1 — sys.shutdown + watchWith self-loop (도그푸딩 #3 F1 회귀
       }),
     ));
 });
+
+describe("M4.1 사이클 2 — 자발 Stopped 시 watcher 알림 (도그푸딩 #3 의제 2)", () => {
+  it("child 가 Behaviors.stopped 반환 → parent 의 watchWith 콜백 정상 발사", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+        type ParentMsg =
+          | { readonly _tag: "Setup" }
+          | { readonly _tag: "ChildGone" };
+
+        const child = Behaviors.receive<string>((_c, m) =>
+          m === "die"
+            ? Effect.succeed(Behaviors.stopped<string>())
+            : Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, sig) =>
+          Effect.sync(() => {
+            if (sig._tag === "PostStop") events.push("child:postStop");
+            return Behaviors.same();
+          }),
+        );
+
+        const parent = Behaviors.setup<ParentMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(child, "kid");
+            yield* ctx.watchWith(c, { _tag: "ChildGone" } as ParentMsg);
+            return Behaviors.receiveMessage<ParentMsg>((m) => {
+              if (m._tag === "ChildGone") {
+                events.push("parent:ChildGone");
+                return Effect.succeed(Behaviors.same());
+              }
+              return ctx.system
+                .tell(c as ActorRef<string>, "die")
+                .pipe(Effect.as(Behaviors.same()));
+            });
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<ParentMsg>(parent, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("80 millis");
+
+        // 자발 Stopped 도 외부 ctx.stop 과 같이 watcher 알림 발사 — fix 검증
+        expect(events).toContain("child:postStop");
+        expect(events).toContain("parent:ChildGone");
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("자발 Stopped 후 registry unregister 됨 (stale entry 제거)", () =>
+    run(
+      Effect.gen(function* () {
+        const child = Behaviors.receive<string>((_c, m) =>
+          m === "die"
+            ? Effect.succeed(Behaviors.stopped<string>())
+            : Effect.succeed(Behaviors.same()),
+        );
+
+        type RootMsg = { readonly _tag: "Setup" };
+        let childPath: ActorRef<string> | null = null;
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(child, "kid");
+            childPath = c;
+            return Behaviors.receiveMessage<RootMsg>((_m) =>
+              ctx.system
+                .tell(c, "die")
+                .pipe(Effect.as(Behaviors.same())),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("80 millis");
+
+        // 자발 Stopped 후 registry 에서 child unregister 됐는지 검증
+        const childResolved = yield* STM.commit(
+          Registry.resolve(sys.registry, childPath!.path),
+        );
+        expect(Option.isNone(childResolved)).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});

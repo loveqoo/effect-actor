@@ -114,6 +114,8 @@ const takeNext = <Msg>(entry: ActorEntry<Msg>): Effect.Effect<Inbox<Msg>> =>
 // M4 사이클 3 (ADR-020/035): Restart 흐름 — outer (restart) + inner (message) 두 loop.
 //   PreRestart 신호 → 현재 Behavior 가 처리 → onRestart 콜백 (자식 cascade + instanceScope 교체) → initial 재평가 → loop 재진입.
 //   같은 fiber 안에서 재진입 — ref/uid/cell/cellScope 모두 보존, instanceScope 만 새로.
+// M4.1 사이클 2: 자발 Stopped / supervisor stop 강등 시 onSelfTermination 콜백 호출
+//   (watcher 알림 + registry unregister). PostStop hook 도 supervisor stop 강등에서 발사.
 const messageLoop = <Msg>(
   initial: Behavior<Msg>,
   entry: ActorEntry<Msg>,
@@ -121,6 +123,7 @@ const messageLoop = <Msg>(
   supervisor: ReadonlyArray<SupervisorRule>,
   startedLatch?: Deferred.Deferred<void, never>,
   onRestart?: () => Effect.Effect<void>,
+  onSelfTermination?: () => Effect.Effect<void>,
 ): Effect.Effect<void, unknown> =>
   Effect.gen(function* () {
     let firstStart = true;
@@ -203,6 +206,13 @@ const messageLoop = <Msg>(
       }
 
       if (needStop) {
+        // M4.1 사이클 2 (의제 1): supervisor stop 강등도 PostStop hook 발사 — 자발 Stopped 흐름과 정합.
+        // PostStop hook 의 fail 은 무시 (cleanup 단계, 원본 cause propagate 가 우선).
+        // onSelfTermination 도 호출 (watcher 알림 + registry unregister).
+        yield* Effect.ignore(
+          interpretSignalStep(lastActive, ctx, SignalNs.PostStop),
+        );
+        if (onSelfTermination) yield* onSelfTermination();
         return yield* Effect.failCause(
           stopCause ?? Cause.die(new Error("supervision: unknown cause")),
         );
@@ -213,6 +223,10 @@ const messageLoop = <Msg>(
     if (!postStopHandled) {
       yield* interpretSignalStep(lastActive, ctx, SignalNs.PostStop);
     }
+    // M4.1 사이클 2 (의제 2): 자발 Stopped + 외부 PostStop 둘 다 onSelfTermination 호출.
+    // 외부 stopActor 가 호출한 경우는 stopActor 자체가 watchers 알림 등 이미 처리하므로 _이중_ 위험 — 그러나
+    // notifyWatchersOnSelfTermination 안 STM 갱신은 모두 idempotent (registry 이미 unregister 면 skip 등) 이라 안전.
+    if (onSelfTermination) yield* onSelfTermination();
   });
 
 // 액터의 메인 루프 (ARCHITECTURE §3.3).
@@ -224,6 +238,7 @@ const messageLoop = <Msg>(
 // M4 사이클 2 (ADR-034): optional supervisor rules — messageLoop 가 step-level 분기. 빈 배열이면 기본 stop (현재 default).
 //   외부 catchAllCause 는 _최종 stop 강등_ 한정 — Resume / Restart 는 messageLoop 안에서 흡수, hook 호출 X.
 // M4 사이클 3 (ADR-020/035): optional onRestart — Restart strategy 발동 시 messageLoop 가 호출 (자식 cascade + instanceScope 교체).
+// M4.1 사이클 2: optional onSelfTermination — 자발 Stopped / supervisor stop 강등 시 호출 (watcher 알림 + registry unregister).
 export const runInterpreter = <Msg>(
   initial: Behavior<Msg>,
   entry: ActorEntry<Msg>,
@@ -233,6 +248,7 @@ export const runInterpreter = <Msg>(
     readonly startedLatch?: Deferred.Deferred<void, never>;
     readonly supervisor?: ReadonlyArray<SupervisorRule>;
     readonly onRestart?: () => Effect.Effect<void>;
+    readonly onSelfTermination?: () => Effect.Effect<void>;
   },
 ): Effect.Effect<void> =>
   Effect.catchAllCause(
@@ -243,6 +259,7 @@ export const runInterpreter = <Msg>(
       options?.supervisor ?? [],
       options?.startedLatch,
       options?.onRestart,
+      options?.onSelfTermination,
     ),
     (cause) => {
       // Setup 평가 도중 fail 시 startedLatch 가 아직 안 끝남 → spawn 의 await 영원. 여기서 succeed 보장.

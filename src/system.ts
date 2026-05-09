@@ -117,6 +117,7 @@ const spawnInternal = <Msg>(
     // onFailure hook — supervision 외피가 잡은 Cause 를 부모에게 ChildFailed 로 알림 (M3 사이클 5).
     // supervisor — meta 추출된 SupervisorRule 배열. 빈 배열이면 기본 stop (M4 사이클 2, ADR-034).
     // onRestart — restart 발동 시 자식 cascade + instanceScope 교체 (M4 사이클 3, ADR-020/035).
+    // onSelfTermination — 자발 Stopped / supervisor stop 강등 시 watcher 알림 + registry unregister (M4.1 사이클 2).
     const fiber = yield* Effect.forkIn(
       runInterpreter(meta.inner, entry, ctx, {
         onFailure: (cause) =>
@@ -124,6 +125,8 @@ const spawnInternal = <Msg>(
         startedLatch,
         supervisor: meta.supervisor,
         onRestart: () => restartCleanup(spawnCtx.registry, entry),
+        onSelfTermination: () =>
+          notifyWatchersOnSelfTermination(spawnCtx.registry, entry),
       }),
       cellScope,
     );
@@ -177,6 +180,71 @@ const makeChildContext = <Msg>(
       make: (replyTo: ActorRef<Resp>) => TargetMsg,
       timeout: Duration.DurationInput,
     ) => askOther(spawnCtx, selfEntry, target, make, timeout),
+  });
+
+// notifyWatchersOnSelfTermination — 자발 Stopped / supervisor stop 강등 시 messageLoop 가 호출 (M4.1 사이클 2).
+// stopActor 의 _watchers 알림 + registry unregister + parent.children 갱신_ 부분만 추출.
+// cellScope close 는 _안 함_ — 자기 fiber 가 자기 scope 닫으면 self-interrupt 위험. cellScope 는
+// 사용자가 sys.shutdown 또는 ctx.stop 호출 시 정리 (자발 stop 후 cellScope 누수는 별도 의제 — ADR-037 후보).
+// F1 fix 의 status check 로 죽어가는 watcher skip 그대로.
+const notifyWatchersOnSelfTermination = <Msg>(
+  registry: RegistryT,
+  entry: ActorEntryT<Msg>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const watcherMap = yield* STM.commit(TRef.get(entry.watchers));
+    const watcherPairs = Array.from(HashMap.entries(watcherMap));
+    yield* Effect.forEach(
+      watcherPairs,
+      ([watcherKey, watchMsg]) =>
+        Effect.gen(function* () {
+          const wFound = yield* STM.commit(
+            Registry.resolve(registry, watcherKey.path),
+          );
+          if (Option.isNone(wFound)) return;
+          if (wFound.value.uid !== watcherKey.uid) return;
+          const watcherStatus = yield* STM.commit(
+            TRef.get(wFound.value.status),
+          );
+          if (watcherStatus === "stopped") return;
+          if (watchMsg._tag === "Terminated") {
+            yield* Queue.offer(
+              wFound.value.cell.signalQueue,
+              Signal.Terminated(entry.path, entry.uid),
+            );
+          } else if (watchMsg._tag === "Custom") {
+            yield* Queue.offer(
+              wFound.value.cell.mailbox as Queue.Queue<unknown>,
+              watchMsg.msg,
+            );
+          } else if (watchMsg._tag === "Deferred") {
+            yield* Deferred.succeed(watchMsg.deferred, void 0 as void);
+          }
+        }),
+      { concurrency: "unbounded", discard: true },
+    );
+
+    // status=stopped (idempotent — stopActor 가 이미 set 했을 수도)
+    yield* STM.commit(TRef.set(entry.status, "stopped"));
+
+    // registry unregister + parent.children 갱신
+    const parentPath = ActorPath.parent(entry.path);
+    yield* STM.commit(
+      STM.gen(function* () {
+        yield* Registry.unregister(registry, entry.path);
+        if (Option.isSome(parentPath)) {
+          const parentFound = yield* Registry.resolve(
+            registry,
+            parentPath.value,
+          );
+          if (Option.isSome(parentFound)) {
+            yield* TRef.update(parentFound.value.children, (c) =>
+              Chunk.filter(c, (p) => !Equal.equals(p, entry.path)),
+            );
+          }
+        }
+      }),
+    );
   });
 
 // restartCleanup — Restart strategy 발동 시 messageLoop 의 onRestart 콜백 (ADR-020/035, M4 사이클 3).
@@ -276,68 +344,13 @@ const stopActor = <Msg>(
 
     // 자동 cleanup — cellScope close 면 instanceScope 도 자동 (ADR-035 child 관계).
     // Stop 흐름은 cellScope 만 close 하면 됨. 사용자 fork/timer + interpreter fiber 의존 자원 모두 정리.
+    // M4.1 사이클 2: watcher 알림 + registry unregister + parent.children 갱신은 _messageLoop 의
+    //   onSelfTermination_ 콜백이 단일 source of truth (외부 stopActor 호출 시도 fiber 가 PostStop 받고
+    //   messageLoop 종료 직전 onSelfTermination 호출). stopActor 는 _cellScope close + queue shutdown_
+    //   만 — fiber 종료 후 안전. 자발 Stopped / supervisor stop 강등도 같은 onSelfTermination 거침.
     yield* Scope.close(entry.cellScope, Exit.void);
     yield* Queue.shutdown(entry.cell.mailbox);
     yield* Queue.shutdown(entry.cell.signalQueue);
-
-    // watchers 알림 (ADR-022) — 각 watcher 의 (path,uid) 가 정상이면 Terminated/Custom 발사.
-    // ABA 안전: watcher.uid 가 현재 entry uid 와 다르면 새 incarnation, 옛 watch 무효.
-    // M4.1 fix (도그푸딩 #3 F1): shutdown cascade 도중 _죽어가는 watcher_ (status=stopped) 에게는
-    //   알림 skip. 그렇지 않으면 self-loop watcher (parent 가 child 를 watchWith 한 상태에서 sys.shutdown)
-    //   케이스에서 child 가 parent.mailbox 에 ChildGone enqueue → parent 의 messageLoop race wait 가
-    //   PostStop 깨우지 못해 hang. 의미상 자연 — 이미 죽고 있는 watcher 에게 알림 무의미.
-    const watcherMap = yield* STM.commit(TRef.get(entry.watchers));
-    const watcherPairs = Array.from(HashMap.entries(watcherMap));
-    yield* Effect.forEach(
-      watcherPairs,
-      ([watcherKey, watchMsg]) =>
-        Effect.gen(function* () {
-          const wFound = yield* STM.commit(
-            Registry.resolve(registry, watcherKey.path),
-          );
-          if (Option.isNone(wFound)) return;
-          if (wFound.value.uid !== watcherKey.uid) return;
-          // 죽어가는 watcher skip (F1 fix)
-          const watcherStatus = yield* STM.commit(
-            TRef.get(wFound.value.status),
-          );
-          if (watcherStatus === "stopped") return;
-          if (watchMsg._tag === "Terminated") {
-            yield* Queue.offer(
-              wFound.value.cell.signalQueue,
-              Signal.Terminated(entry.path, entry.uid),
-            );
-          } else if (watchMsg._tag === "Custom") {
-            yield* Queue.offer(
-              wFound.value.cell.mailbox as Queue.Queue<unknown>,
-              watchMsg.msg,
-            );
-          } else if (watchMsg._tag === "Deferred") {
-            // Effect 형태 watchTerminated — Deferred 직접 succeed (cell 무관).
-            yield* Deferred.succeed(watchMsg.deferred, void 0 as void);
-          }
-        }),
-      { concurrency: "unbounded", discard: true },
-    );
-
-    // Registry unregister + parent.children 에서 제거 (정합성, 한 STM tx)
-    const parentPath = ActorPath.parent(entry.path);
-    yield* STM.commit(
-      STM.gen(function* () {
-        yield* Registry.unregister(registry, entry.path);
-        if (Option.isSome(parentPath)) {
-          const parentFound = yield* Registry.resolve(
-            registry,
-            parentPath.value,
-          );
-          if (Option.isSome(parentFound)) {
-            yield* TRef.update(parentFound.value.children, (c) =>
-              Chunk.filter(c, (p) => !Equal.equals(p, entry.path)),
-            );
-          }
-        }
-      }),
-    );
   });
 
 // ctx.stop(child) — child entry resolve + uid 검증 (ABA 안전) → stopActor.

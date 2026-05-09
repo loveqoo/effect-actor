@@ -457,3 +457,58 @@ if (watcherStatus === "stopped") return;
 #### 다음 (사이클 2)
 
 의제 1, 2 — 자발 stop / supervisor stop 강등 시 PostStop + watcher 알림 통합. F1 fix 와 _독립_ — 다른 root cause (_종료 통로 자체가 호출 안 됨_ vs F1 의 _호출 후 wake-up 실패_). ADR-037 박을지 사이클 2 진단 후 결정.
+
+
+
+### 2026-05-09 — M4.1 사이클 2 (의제 1+2 fix — onSelfTermination 통일)
+
+#### 진단 결과 (실측)
+
+- **의제 1**: `supervise + matchAll → stop` 으로 child fail → events: `[]`. supervisor stop 강등 시 child PostStop hook 안 호출. messageLoop 의 `needStop` 분기에서 `Effect.failCause` 로 즉시 propagate, 자발 Stopped 흐름의 `interpretSignalStep(PostStop)` 거치지 않음.
+- **의제 2**: `Behaviors.stopped` 반환 → events: `["child:postStop"]`. child PostStop 정상, 단 parent 의 ChildGone 미수신. _watchers 알림 / registry unregister / parent.children_ 모두 `stopActor` 안에 있는데 자발 Stopped 는 stopActor 거치지 않음 → cleanup 부재.
+- **비교 (외부 ctx.stop)**: `["child:postStop", "parent:ChildGone"]` 정상.
+
+→ 두 의제는 _다른 root cause_ (의제 1 = 통로 호출 안 됨, 의제 2 = cleanup 자체 부재). consumer 의 _F3 단일 root cause_ 가설 (ADR-037) 은 _semantic 일치_ 측면 정확하지만 _근본 메커니즘_ 은 두 layer.
+
+#### Fix (노선 C — 작은 fix 두 개 + ADR-037 큰 통일은 별도)
+
+**1. `onSelfTermination` 콜백 도입 (interpreter.ts)**
+- `runInterpreter` / `messageLoop` 에 `onSelfTermination?: () => Effect<void>` 옵션 추가.
+- _자발 Stopped 분기_ + _supervisor stop 강등 분기_ 둘 다 호출.
+- supervisor stop 강등은 PostStop hook 도 추가 발사 (`Effect.ignore` 로 fail 무시 — 원본 cause propagate 우선).
+
+**2. `notifyWatchersOnSelfTermination` 헬퍼 (system.ts)**
+- `stopActor` 의 _watchers 알림 + registry unregister + parent.children 갱신_ 부분만 추출.
+- F1 fix 의 status check (죽어가는 watcher skip) 그대로 포함.
+- _cellScope close 안 함_ — 자기 fiber 가 자기 scope 닫으면 self-interrupt 위험. cellScope 는 사이클 2 범위 밖.
+
+**3. `stopActor` 의 cleanup 부분 제거 (단일 source of truth)**
+- 이중 호출 회귀 발견: 외부 stopActor 가 watcher 알림 + fiber 가 PostStop 받고 messageLoop 가 onSelfTermination 호출 → 두 번 fire (ABA test 실패로 surface).
+- 해결: `stopActor` 에서 _watchers 알림 + registry unregister + parent.children_ 제거 → `onSelfTermination` 만 함.
+- 외부 stopActor 도 _fiber 가 PostStop 받고 messageLoop 종료 직전 onSelfTermination 호출_ → 단일 경로.
+- `stopActor` 는 _status=stopped + cascade + PostStop offer + fiber await + cellScope close + queue shutdown_ 만.
+
+#### 회귀 테스트 (4개 추가, 총 161)
+
+- supervision.test.ts:
+  - `supervise + matchAll → stop` 으로 child fail → PostStop hook 호출됨 (의제 1)
+  - `supervise + 미매치` → 기본 stop 도 PostStop hook 호출 (회귀)
+- system.test.ts:
+  - `Behaviors.stopped` 반환 → parent watchWith 콜백 정상 발사 (의제 2)
+  - 자발 Stopped 후 registry 에서 child unregister 됨 (stale entry 제거)
+
+#### 회귀 발견 + 정정
+
+ABA test (M3 ctx.watch 사이클 2) 실패 — 외부 stopActor 의 watcher 알림 + onSelfTermination 의 watcher 알림 _이중_. _Queue.offer 두 번 = 두 메시지_, idempotent X. fix: stopActor 에서 watcher 알림 제거 (단일 source of truth). 위 _Fix #3_ 으로 정정.
+
+#### 사이클 2 범위 밖 (ADR-037 후보)
+
+- _자발 Stopped 후 cellScope 누수_ — entry 의 cellScope 가 영구 살아있음. 사용자가 sys.shutdown 호출하면 root 의 cellScope close 시 _자식 entry 의 cellScope_ 는 별개 (cellScope 가 _서로 child 관계 아님_) 라 남음. 메모리 누수.
+- _자발 Stopped 시 자식 cascade 안 함_ — 자식 actor 가 _고아_. Akka 정통은 _자발 stop 도 자식 cascade_.
+- _PreRestart 처리 도중 fail = 단순 stop 강등_ (사이클 5 발견 의제 3) — M5 withLimit 와 같이.
+
+세 의제 모두 같은 패밀리 (_stop/cleanup 경로 정합성_). M5 끝 본격 도그푸딩 (ADR-024) 에서 표면 노출 빈도 보고 ADR-037 박을지 결정.
+
+#### 다음 (사이클 3)
+
+poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특히 cycle 3 watchWith + shutdown / cycle 5A 자발 / cycle 5C supervisor stop) 통과 확인. 모두 통과 시 M4 _전체_ DoD 🟢.

@@ -793,3 +793,63 @@ describe("매처 chain 분기 통합 (사이클 4)", () => {
       }),
     ));
 });
+
+describe("M4.1 사이클 2 — supervisor stop 강등 시 PostStop hook (도그푸딩 #3 의제 1)", () => {
+  it("supervise + matchAll → stop 으로 child fail → PostStop hook 호출됨", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+        const inner = Behaviors.receive<string>((_c, _m) =>
+          Effect.die(new Error("trigger")),
+        ).receiveSignal((_c, sig) =>
+          Effect.sync(() => {
+            if (sig._tag === "PostStop") events.push("postStop");
+            return Behaviors.same();
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchAll,
+          Strategies.stop,
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom");
+        yield* Effect.sleep("60 millis");
+
+        // supervisor stop 강등도 자발 Stopped 와 같이 PostStop hook 호출 — fix 검증
+        expect(events).toEqual(["postStop"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("supervise 매처 미매치 → 기본 stop 도 PostStop hook 호출 (회귀)", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+        const inner = Behaviors.receive<string>((_c, _m) =>
+          Effect.die(new TypeError("type")),
+        ).receiveSignal((_c, sig) =>
+          Effect.sync(() => {
+            if (sig._tag === "PostStop") events.push("postStop");
+            return Behaviors.same();
+          }),
+        );
+
+        // RangeError 만 잡음 → TypeError 미매치 → 기본 stop
+        const supervised = Behaviors.supervise(inner).onFailure(
+          (e) => e instanceof RangeError,
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom");
+        yield* Effect.sleep("60 millis");
+
+        expect(events).toEqual(["postStop"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});
