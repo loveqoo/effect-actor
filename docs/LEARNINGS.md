@@ -614,3 +614,37 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [process] **_이미 fix 된 cliff_ 표 박음.** #2/#3 의 finding 들 (spawn race / 의제 1+2 / F1 / Effect 밖 throw) 모두 _이미 fix_ — #4 에서 _재발견되면 회귀_. 회귀 안전 검증 자동.
 - [process] AGENTS.md + CLAUDE.md 색인 갱신 — 새 가이드 진입점 등록.
 - [process] PLAN.md M5.1 환류 사이클 박음 — _가이드 작성_ 사이클 1, 사이클 2+ 는 finding 도착 시 환류 fix.
+
+
+
+### 2026-05-09 — M5.1 사이클 2 (도그푸딩 #4 결과) + M5 완료 명시
+
+#### 도그푸딩 #4 결과 요약
+
+- **5 사이클 × 3회 = 15회 모두 통과**, finding 0, 회귀 0, flake 0.
+- **사이클 1** (supervise + matcher chain + backoff/withLimit): matchTag/matchAll/restartWithBackoff/withLimit 모두 약속대로. randomFactor=0 으로 deterministic 검증 가능.
+- **사이클 2** (withTimers + ctx.fork): heartbeat 정확 + restart 시 자동 cancel + sys.shutdown 시 instanceScope close.
+- **사이클 3** (withStash): FIFO 순서 보장 + capacity 초과 → matchTag("StashOverflow") + restart 시 buffer 비움.
+- **사이클 4** (watchWith + ask + scheduleOnce): AskTimeout TaggedError + Effect.catchTag + scheduleOnce → self delayed tell 모두 자연.
+- **사이클 5** (stress 종합): 5 workers × 30 tasks (병렬), occasional fail 도중 mailbox 보존 + race-free + sys.shutdown 깔끔.
+
+#### 5 cliff 회귀 검증 (가이드 §7)
+
+- spawn race ✅ 안정
+- supervisor stop 강등 PostStop ✅ 호출
+- 자발 Stopped watcher ✅ 알림
+- self-loop watchWith hang ✅ 정상 종료
+- Effect 밖 throw ✅ 무관 (cycle 들에서 자연스럽게 안 등장)
+
+#### M5 완료 명시
+
+- [process] **M5 마일스톤 _전체_ DoD 확정.** 코드 사이클 1~5 + 미니 사이클 (Effect 밖 throw 안전망) + M5.1 사이클 1 (가이드 작성) + 사이클 2 (도그푸딩 #4 통과) 모두 충족. PLAN.md M5 상태 표기 🟢 완료. 누적 201 테스트.
+- [process] M5 의 _진짜 완료_ 도 M3 / M4 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 통과 시점_. ADR-024 정신 일관 (#1 → ADR-028~031, #2 → M3.1, #3 → M4.1, **#4 → fix 불요**).
+- [insight] **본격 도그푸딩이 _finding 0_ 으로 통과한 의미.** #1~#3 환류 사이클이 _이미_ 본 표면을 다 다듬어 놓음 + 미니 사이클이 _Effect 밖 throw_ cliff 사전 fix → #4 의 _finding 0_ 은 _저절로_ 가 아닌 _누적된 환류_ 의 결과. _도그푸딩 입력은 철학 안에서 수용_ (ADR-028) + _라이브러리 설계 우선_ + _도그푸딩 입력 직전 표면 다듬기_ 패턴이 _배포 직전_ 까지 통과한 셈.
+- [insight] **consumer 추가 관찰의 _긍정적 신호_.** (1) domain 어휘 자연 — RateLimitError/BackendError/StashOverflow/AskTimeout 모두 Tagged 라 matchTag 하나로 충분. (2) ctx.ask + Effect.catchTag + scheduleOnce 합성이 Akka Typed retry 정통과 일치. (3) typecheck 깨끗, install 마찰 없음. _wrapper 부담 5~10줄_ 가이드 약속 (ADR-028 의 _3차 잣대_) 유지.
+- [process] 다음 갈래: **M∞ 진입** (npm 배포 직전 결정거리). 후보:
+  - (a) semver 정책 결정 (ADR — 0.x = minor breaking, 1.0+ = SemVer 후보)
+  - (b) 영어 README + CHANGELOG + CONTRIBUTING.md
+  - (c) 빌드 도구 결정 (ADR-027 후속) + setup-deploy
+  - (d) Effect TMap upstream PR (#6225 follow-up, 우회 패치 본체로 보낼지)
+  - (e) 0.1.0 배포 자체

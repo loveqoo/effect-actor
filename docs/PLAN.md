@@ -17,7 +17,7 @@
 | M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
-| M5. 고급 기능 | 🟡 코드 완료 | Backoff / withLimit / Stash / Timer. 사이클 1~5 완료 (ADR-037~040 + examples 06~08). 197 테스트. _본격 도그푸딩 (M5.1) 만 남음._ |
+| M5. 고급 기능 | 🟢 완료 | Backoff / withLimit / Stash / Timer + examples 06~08 + Effect 밖 throw 안전망. ADR-037~040. 201 테스트. **도그푸딩 #4 통과 — finding 0, 회귀 0, 5×3=15회 flake-free.** |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
@@ -243,11 +243,11 @@
 - Stash 용량 초과 시 supervision 으로 흘리는 흐름
 - Timer 가 액터 stop 시 자동 정리 (instance Scope 닫힘 — ADR-021)
 
-**마일스톤 완료 조건 (DoD):**
+**마일스톤 완료 조건 (DoD) — 모두 충족 ✅:**
 - [x] `examples/06-backoff.ts` — restartWithBackoff (사이클 5)
 - [x] `examples/07-stash.ts` — withStash (사이클 5)
 - [x] `examples/08-timer.ts` — withTimers (사이클 5)
-- [ ] **M5 끝 _본격_ 도그푸딩 (ADR-024)** — poly-phony 전면 도그푸딩 시작. _코드 DoD 끝, 도그푸딩 사이클 (M5.1) 만 남음._
+- [x] **M5 끝 _본격_ 도그푸딩 (ADR-024)** — poly-phony #4 통과. 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. consumer 시점 표면 거친 부분 없음.
 
 **완료된 사이클:**
 - 🟢 사이클 1 — `Strategies.restart.withLimit({ maxNrOfRetries, withinTimeRange })` + 의제 3 (PreRestart 재실패 → stop 강등) 통합. ADR-037 박음. `RestartLimitExceeded` tagged error 추가. 누적 169 테스트, 5회 flake-free.
@@ -257,9 +257,11 @@
 - 🟢 사이클 5 — `examples/06-backoff.ts` + `07-stash.ts` + `08-timer.ts` + USAGE.md 갱신 (M5 표면 표 + Errors + 안 되는 것 정리). 모두 `pnpm tsx` 실행 검증. M5 _코드_ DoD 충족.
 - 🟢 미니 사이클 — _Effect 밖 throw_ 안전망 (interpretStep / interpretSignalStep 의 Effect.suspend wrap). ADR-040 후속 resolved. 누적 201 테스트.
 
-**M5.1 환류 사이클 (도그푸딩 #4 결과 받음 후):**
-- 🟡 사이클 1 (가이드 작성) — `docs/DOGFOODING.md` 박음. 5 사이클 분할 + 검증 약속 + 결과 형식. AGENTS.md 색인. _poly-phony 측 진행 신호 대기 중._
-- [ ] 사이클 2~N — finding 도착 시 환류 fix + 재검증. M3.1 / M4.1 패턴 그대로.
+**M5.1 환류 사이클 (도그푸딩 #4 결과):**
+- 🟢 사이클 1 (가이드 작성) — `docs/DOGFOODING.md` 박음.
+- 🟢 사이클 2 (도그푸딩 진행) — poly-phony 측 5 사이클 × 3회 모두 통과. _finding 0, 회귀 0, 환류 fix 불요._
+
+**M5 _전체_ DoD 확정 (2026-05-09):** 코드 + examples + 도그푸딩 #4 통과 + 안전망 (Effect 밖 throw fix). 201 테스트.
 
 ---
 
