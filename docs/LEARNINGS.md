@@ -512,3 +512,23 @@ ABA test (M3 ctx.watch 사이클 2) 실패 — 외부 stopActor 의 watcher 알�
 #### 다음 (사이클 3)
 
 poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특히 cycle 3 watchWith + shutdown / cycle 5A 자발 / cycle 5C supervisor stop) 통과 확인. 모두 통과 시 M4 _전체_ DoD 🟢.
+
+
+
+### 2026-05-09 — M4.1 사이클 3 (재검증) + M4 완료 명시
+
+#### 재검증 결과 (poly-phony 측, 5 사이클 × 5회 = 25회)
+
+- **F1 (cycle 3 sys.shutdown hang with watchWith)**: 1112ms timeout → 111ms 정상 종료. ✅
+- **의제 2 (cycle 5A 자발 `Behaviors.stopped` → watcher 미알림)**: childGoneCount 0 → 1. ✅
+- **의제 1 (cycle 5C supervisor stop 강등 → PostStop 미호출)**: postStopCount 0 → 1. ✅
+- **F2 (cycle 5C supervisor stop 강등 → watcher 미알림, 5C 부수 finding)**: childGoneCount 0 → 1. ✅ — 의제 1 fix 와 같은 `onSelfTermination` 통로로 자동 해결.
+- **회귀 검증**: M4 4 핵심 약속 (resume / restart / PreRestart / 자식 cascade) + 매처 (matchInstance / matchAll) 모두 회귀 0. agent/ 디렉토리 합산 runtime ~1.02s 일관 (편차 ~10ms). 8 M4 테스트 + 99 (M3 + 기타) = 106/107 통과 1 skipped 안정.
+- **새 finding**: 0. 잠재 의제 (cellScope 누수 / 자식 cascade / PreRestart 재실패) 는 현재 도메인 시나리오에서 자연스럽게 노출 X — M5 묶음 후보.
+
+#### M4 완료 명시
+
+- [process] **M4 마일스톤 _전체_ DoD 확정.** 코드 사이클 1~5 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 사이클 1~3 (F1 + 의제 1+2 fix + consumer 측 25회 flake-free 재검증) 모두 충족. PLAN.md M4 상태 표기 🟢 완료. 누적 161 테스트.
+- [process] M4 의 _진짜 완료_ 도 M3 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 환류 fix 까지 통과한 시점_. ADR-024 정신 일관 (M2 끝 #1 → ADR-028~031, M3 끝 #2 → M3.1, M4 끝 #3 → M4.1).
+- [insight] **single root cause 가설 검증.** consumer (poly-phony) 측 ADR-037 가설 = "F3 단일 root cause". 라이브러리 측 진단 = "두 layer (의제 1 = 통로 호출 안 됨, 의제 2 = cleanup 자체 부재)". 결론: _semantic 일치_ 측면에서 가설 정확, _근본 메커니즘_ 측면에서는 두 layer. 작은 fix 두 개 (`onSelfTermination` 콜백 + cleanup 단일 source of truth) 로 4개 finding (F1 + F2 + 의제 1 + 의제 2) 모두 closed → consumer 가설의 _semantic 통일_ 직관이 사실상 맞았음. ADR-037 큰 통일은 미루고 작은 fix 로 충분 → _라이브러리 설계 우선_ (ADR-028) 정신 그대로.
+- [process] 다음 갈래 후보: (a) M5 진입 (Backoff / Stash / Timer), (b) Effect TMap 본체 PR (issue #6225 follow-up), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ 정신상 (a) 가 자연스러운 다음.

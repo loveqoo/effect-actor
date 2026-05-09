@@ -16,7 +16,7 @@
 | M2. Lifecycle | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook (자동 + 외부 emit). 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계. |
 | M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
-| M4. Restart | 🟡 진행 중 | Supervision (resume/restart/stop). 사이클 1~5 코드 완료. M4 도그푸딩 #3 결과 도착 (의제 1, 2 노출 확정 + F1 sys.shutdown hang 신규). M4.1 환류 사이클 진입 예정 — 환류 fix 후 🟢. |
+| M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
 | M5. 고급 기능 | ⚪ 대기 | Backoff / withLimit / Stash / Timer |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
 
@@ -197,18 +197,29 @@
 - Supervise wrapping 의 nested 처리 (여러 onFailure chain)
 - PreRestart 처리 도중 재실패 → 정책 재적용 (강도 제한)
 
-**마일스톤 완료 조건 (DoD):**
-- [x] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증 ✅ (사이클 5)
-- [x] **M4 끝 도그푸딩 (~1주, ADR-024)** — poly-phony 측 5 사이클 완료. 핵심 약속 9개 중 ✅ 8 + ⚠️ 1, 의제 1·2 노출 확정 + F1 신규 BUG (sys.shutdown hang when watchWith). 환류 fix (M4.1) 진행 중.
+**마일스톤 완료 조건 (DoD) — 모두 충족 ✅:**
+- [x] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증 (사이클 5)
+- [x] **M4 끝 도그푸딩 (~1주, ADR-024)** — poly-phony 측 5 사이클 완료. 핵심 약속 9개 중 ✅ 8 + ⚠️ 1, 의제 1·2 노출 확정 + F1 신규 BUG (sys.shutdown hang when watchWith). 환류 fix → M4.1.
+- [x] **M4.1 환류 fix + 재검증** — 4개 finding (F1 + 의제 1 + 의제 2 + F2) 모두 closed, consumer 측 5 사이클 × 5회 = 25회 flake-free.
+
+**완료된 사이클:**
+- 🟢 사이클 1 — Strategy ADT (`Resume` / `Restart` / `Stop`) + `Behaviors.supervise(b).onFailure(matcher, strategy)` fluent 빌더 + `unwrapMeta` 두 종류 래퍼 추출 (ADR-034). 10 테스트
+- 🟢 사이클 2 — `Strategies.resume` step-level supervision (messageLoop 의 `Effect.exit` + `pickStrategy`). PostStop 은 supervision 밖. 10 테스트
+- 🟢 사이클 3 — `Strategies.restart` + PreRestart 신호 + Setup 재실행 + 자식 cascade + Scope 분리 (ADR-035 cellScope/instanceScope). 8 테스트
+- 🟢 사이클 4 — Error matcher 헬퍼 (`matchInstance` / `matchTag` / `matchAll` / `matchPredicate`) + sequential 순회 약정. 4 테스트
+- 🟢 사이클 5 — `examples/05-restart.ts` + 발견 의제 정리. 4 테스트. 누적 154 테스트.
 
 **M4.1 환류 사이클 (도그푸딩 #3 결과 fix):**
-- [ ] 사이클 1 — F1 진단 + fix (consumer reproducer → 라이브러리 실측 root cause)
-- [ ] 사이클 2 — 의제 1+2 fix (자발 stop / supervisor stop 강등 시 PostStop + watcher 통합). ADR-037 박을지 사이클 1 진단으로 결정.
-- [ ] 사이클 3 — poly-phony 측 재검증 → M4 _전체_ DoD 🟢
+- 🟢 사이클 1 — F1 (sys.shutdown hang when watchWith): self-loop watcher 알림 시 status 체크 추가 (죽어가는 watcher skip). 1112ms timeout → 111ms 정상 종료.
+- 🟢 사이클 2 — 의제 1+2 (자발 stop / supervisor stop 강등 시 PostStop+watcher 통합): `onSelfTermination` 콜백 도입, `stopActor` 의 cleanup 부분을 단일 source of truth 로 통합. ADR-036. 4 테스트 (총 161).
+- 🟢 사이클 3 — poly-phony 측 재검증 (5 사이클 × 5회 = 25회 flake-free, 4개 finding 모두 closed, 회귀 0). M4 _전체_ DoD 🟢.
 
-**M5 로 미룸:**
+**M4 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 환류 fix + 재검증 모두 충족. 161 테스트.
+
+**M5 로 미룸 (ADR-037 후보):**
 - 의제 3 (PreRestart 재실패) — restart-cleanup 정책 + withLimit 와 묶음
 - matchTag 본격 검증 — agent layer BackendError ADT 매처 chain
+- 자발 Stopped 후 cellScope 누수 / 자식 cascade — _stop/cleanup 경로 정합성_ 패밀리. M5 끝 본격 도그푸딩에서 표면 빈도 보고 ADR-037 박을지 결정.
 
 ---
 
