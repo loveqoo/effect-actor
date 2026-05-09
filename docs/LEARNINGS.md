@@ -682,3 +682,16 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [content] `.github/ISSUE_TEMPLATE/{bug_report,feature_request}.md` + `PULL_REQUEST_TEMPLATE.md`. feature request 가 _out-of-scope check_ (ADR-006 비목표) 박혀 있어 _Cluster / Persistence_ 류 issue 자동 차단. PR template 은 ADR-041 의 _0.x = breaking minor_ 명시.
 - [process] _배포 직전 표면 셋업_ 이 _문서 셋업_ 보다 비용 큼 — README 영어 + CHANGELOG 0.1.0 entry 가 ~30분 중 가장. ADR 박은 시점에 _배포 직전 surface_ 까지 예약된 셈 (ADR-041 의 후속 항목 명시).
 - [insight] **CHANGELOG 의 _ADR 번호 인용_ 패턴.** 모든 Added 항목에 (ADR-NN) 표기 → 사용자가 _왜_ 이 표면이 있는지 ADR 로 직진 가능. 도그푸딩 #4 의 _domain 어휘 자연_ 관찰처럼 — _decision provenance_ 가 사용자 표면에 노출되어 학습 비용 감소.
+
+
+
+### 2026-05-09 — M∞ 사이클 (g): 자체 코드 점검
+
+- [audit] 잔재 점검 — TODO/FIXME/console.log/HACK/XXX 모두 **0**. eslint-disable 2건만 (interpreter.ts 의 `no-constant-condition` outer while loop, supervision.ts 의 `no-explicit-any` 매처 lenient — 둘 다 의도된 ADR 명시).
+- [audit] **Dead code 0**. index.ts 의 _내부 자료구조_ (ActorEntry / Registry / Cell) 노출은 _도그푸딩 단계 의도_ — minor 에서 _internal 표면 제거_ 가능 (ADR-041 의 0.x = breaking minor 정신).
+- [audit] Import 일관성 OK — `verbatimModuleSyntax` 강제로 `import type` 명시. effect 의존 import 도 _file 별 모인 한 줄_ 정통 패턴.
+- [metrics] **Bundle**: 42KB tarball / 58KB uncompressed (16 파일). src 총 2,221 lines. system.ts 609 + interpreter.ts 363 가 가장 큼 (supervisor + spawn + cleanup 흐름 응집). 분리 가능하지만 _응집력_ 우선.
+- [metrics] **API 표면 일관성** — Akka Typed 정통 매핑 (`receive` / `setup` / `withMailbox` / `withTimers` / `withStash` / `supervise` / `Strategies.{resume,restart,stop,restartWithBackoff,matchInstance,matchTag,matchAll}` / `ctx.{spawn,stop,watch,watchWith,unwatch,watchTerminated,ask,fork,scheduleOnce}`). 시그너처 모두 Effect 반환 일관.
+- [finding] **JSDoc 0개** — 모든 export 에 `/** ... */` 부재. IDE hover 시 빌더 의미 표시 안 됨. USAGE.md 가 1차 표면이라 _절대 cliff_ 는 아님. 비용 30~60분 — 별도 사이클 (배포 후 사용자 IDE feedback 받고) 후보.
+- [decision] **(g) 자체 코드 변경 0.** 명백한 잔재/dead/일관성 모두 깨끗. _구조적 cliff_ (예: stopActor 재귀 깊이, restartHistory 무한 증가, watcher unbounded forEach) 는 codex 가 잡을 영역 — (f) 로 패스.
+- [insight] **자체 점검의 가치 = _명백한 cliff 자동 차단_.** _구조적 cliff_ 는 외부 시야 (codex / 도그푸딩) 가 우월. 두 layer 분리: 자체 (코드 표면 깨끗) → 외부 (구조/일관성). _signal-noise ratio_ 좋아짐.
