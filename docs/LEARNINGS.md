@@ -43,14 +43,14 @@
 ### 2026-05-09 — plan-eng-review (M1 진입 직전)
 
 - [workflow] outside voice 를 _두 라운드_ 돌리는 게 가치 있다. round 1 결과를 _round 1 결정에 다시_ 돌려서 round 2 가 _10개 새 발견_ 짚음 (Critical 4 포함). _결정 자체에 대한 검증_ 이 _초기 발견 검증_ 만큼 중요.
-- [architecture] supervision 외피가 _완전 분리_ 가 아니라 _interpreter 와 같은 fiber 안 catchAll_. Akka ActorCell 도 광광 — supervisor + Behavior 둘 다 같은 cell 보유. 단순 분리 원리는 깰 수 있다. (ADR-020)
+- [architecture] supervision 외피가 _완전 분리_ 가 아니라 _interpreter 와 같은 fiber 안 catchAll_. Akka ActorCell 도 같은 모양 — supervisor + Behavior 둘 다 같은 cell 보유. 단순 분리 원리는 깰 수 있다. (ADR-020)
 - [architecture] watch 식별자는 _path-only 가 아니라 (path, uid)_ 여야 ABA 안전. ref 의 incarnation 만으로는 부족 — watchers TMap key 자체가 (path, uid) 조합 필요. (ADR-022)
 - [architecture] tell 의 _완전한 원자성_ 은 STM 으로도 어차피 못 얻는다 (mailbox 가 STM 밖). 그러므로 _best-effort delivery 명시_ 가 맞다 — Akka 도 같음. _송신 결과 표_ (stale/in-flight/fresh) 를 사용자에게 노출. (ADR-019)
 - [architecture] ref 가 cell 직접 보유 + UID 검증 = stable ref 의 본질. tell hot path lookup 0회. _stable ref = mailbox cell identity_ 정확한 정의. path lookup 강제 X. (ADR-019)
 - [architecture] Instance Scope 가 cleanup 의 _기본_, PostStop 이 _명시 hook_. 우선순위 명시가 _두 모델 공존_ 의미 정정. (ADR-021)
 - [architecture] Behavior 래퍼 (withMailbox/supervise/setup) 는 spawn 0단계에서 _벗겨져_ 메타 추출. 같은 패턴 적용. ADT 일관성 우선. (ADR-026)
 - [api] ActorSystem<RootMsg> generic 이 _첫 코드부터 타입 안전_ 보장. system.root.tell 이 컴파일타임 검증. Akka Typed 정통. (ADR-026)
-- [api] narrowUnsafe 이름 변경만으로는 _미봉_. adapter actor 패턴을 API.md 예제로 같이 박지 않으면 사용자는 그냥 캐스팅. _대안 명시_ 가 _경고_ 보다 효과적. (ADR-023)
+- [api] narrowUnsafe 이름 변경만으로는 _미봉_. adapter actor 패턴을 API.md 예제로 같이 적지 않으면 사용자는 그냥 캐스팅. _대안 명시_ 가 _경고_ 보다 효과적. (ADR-023)
 - [strategy] STM vs 시스템 명령 fiber — 둘 다 _구조적 안전_ 제공이지만 _학습 부담_ 측 시스템 fiber 가 단순. 0.x 단일 프로세스에서 STM 는 _과설계 가능성_ 이 있음. _결정 일관성_ 으로 STM 유지하지만 ARCHITECTURE.md 에 _비교_ 명시. (ADR-017)
 - [strategy] 도그푸딩 시점 _M3 끝_ 도 늦음. M1~M2 토대 (incarnation/cell ref/Scope/STM/setup) 가 _쓴 코드에서_ 진짜 동작하는지 _M2 끝_ 시점에 부딪혀야. ~1주 가벼운 도그푸딩 사이클이 _토대 검증_ 으로 의미. (ADR-024)
 - [process] 한 세션 안에서 _20개 결정_ 가능. Round 1 (10개) → outside voice → round 2 (10개) → 출력물. 한 결정 당 ~5분 + outside voice ~2분 = 약 2시간 세션. 결정 _뒤집지 않는_ 일관성 패턴 (예: STM 유지) 이 사용자 신뢰도와 균형.
@@ -58,9 +58,9 @@
 ### 2026-05-09 — M1 사이클 0 (툴체인 셋업)
 
 - [tooling] pnpm 11 + corepack 으로 packageManager 핀. `"packageManager": "pnpm@11.0.8"` 한 줄로 팀 도구 통일. (ADR-027)
-- [tooling] TypeScript 5 strict 옵션 묶음에서 _자주 무는 곳_: `exactOptionalPropertyTypes` (optional 과 undefined 다름), `noUncheckedIndexedAccess` (배열/Record 접근이 `T | undefined`), `verbatimModuleSyntax` (type-only import 강제). 처음부터 박는 게 후속 수정 비용 < 추가 타입 부담.
+- [tooling] TypeScript 5 strict 옵션 묶음에서 _자주 무는 곳_: `exactOptionalPropertyTypes` (optional 과 undefined 다름), `noUncheckedIndexedAccess` (배열/Record 접근이 `T | undefined`), `verbatimModuleSyntax` (type-only import 강제). 처음부터 정하는 게 후속 수정 비용 < 추가 타입 부담.
 - [effect-ts] `@effect/vitest` 가 Effect 런타임 통합 일급 — `it.effect("name", () => Effect<...>)` 형태. 일반 vitest 의 `it` 안 Effect.runPromise 보다 깔끔. M1 사이클 1 부터 사용 예정.
-- [tooling] pnpm 11 의 `allowBuilds` 정책 — `esbuild` 등의 postinstall 이 _opt-in_. 첫 install 시 `pnpm-workspace.yaml` 자동 생성 후 `allowBuilds: { esbuild: true }` 박아야 fail 안 함. 한 번만 풀면 lock 파일에 박힘. (사이클 0 첫 막힘 지점)
+- [tooling] pnpm 11 의 `allowBuilds` 정책 — `esbuild` 등의 postinstall 이 _opt-in_. 첫 install 시 `pnpm-workspace.yaml` 자동 생성 후 `allowBuilds: { esbuild: true }` 추가해야 fail 안 함. 한 번만 풀면 lock 파일에 들어감. (사이클 0 첫 막힘 지점)
 
 ### 2026-05-09 — M1 사이클 1 (핵심 자료구조)
 
@@ -80,7 +80,7 @@
 
 ### 2026-05-09 — M1 사이클 3 (ActorContext + 해석 루프 + Supervision 외피)
 
-- [process] TDD 잘게 쪼갠 효과 — 사이클 2 에서 _큰 Red 한 번_ 보다, 사이클 3 의 _5단계 Red→Green_ 이 오류 디버깅 부담 적음. 한 단위 fail 시 _이전 통과_ 가 의도 보장. 사이클 3 끝나도 _supervision invariant_ 가 _별도 Red_ 로 박혀 한눈에 명세 보임.
+- [process] TDD 잘게 쪼갠 효과 — 사이클 2 에서 _큰 Red 한 번_ 보다, 사이클 3 의 _5단계 Red→Green_ 이 오류 디버깅 부담 적음. 한 단위 fail 시 _이전 통과_ 가 의도 보장. 사이클 3 끝나도 _supervision invariant_ 가 _별도 Red_ 로 들어 있어 한눈에 명세 보임.
 - [effect-ts] `Effect.catchAllCause(self, () => Effect.void)` 가 _fail + defect_ 둘 다 흡수. `Effect.catchAll` 만 쓰면 die (defect) 못 잡음 — supervision 외피의 _완전한_ 차단을 위해 `catchAllCause` 가 정확. (사이클 5 supervision strategy 도 같은 패턴.)
 - [architecture] handler 의 fail 채널 `unknown` 으로 — 사용자가 `Effect.fail(any Error)` 자유롭게 던질 수 있음. supervision 외피가 _전부 받음_. ADR-020 의 의미: _interpreter 와 같은 fiber 안의 catchAllCause 외피_ — 이 한 줄이 코드로 정확히 표현.
 - [api/?] _Same 반환은 이전 behavior 유지_ 가 사이클 3 의 _첫 행동 fix_. interpreter.test 의 "Receive 가 Same 반환하면 _현재 Receive_ 그대로" 가 _Akka semantics_ 정확. counter actor 테스트 (Same 반환 4번) 으로도 검증됨.
@@ -102,6 +102,159 @@
 - [api] `ActorContext.spawn` 의 시그니처: `(behavior, name) => Effect<ActorRef<ChildMsg>>`. ctx 만들 때 system 이 _자기 자신을 부모 entry 와 묶어_ spawn 함수를 채움. ctx 객체가 _self entry 의 spawn 권한_ 보유.
 - [tooling] `verbatimModuleSyntax` + 같은 이름의 `interface X` + `const X` — `export { X }` 한 줄로 type+value 둘 다 export. `export type { X }` + `export { X }` 두 줄은 _Duplicate identifier_ 충돌. 단일 export 가 정답.
 - [api] index.ts 의 `XOps` 별칭 모두 제거 — 사용자 표면이 깔끔해짐 (`ActorPath`, `Behaviors`, `ActorSystem` 같이 자연 import). `ActorSystemHandle` 만 `export type` 으로 남겨 _internal 권장_ 표시. 사용자가 `import type` 안 하고 사용해도 안전하지만 의도 전달.
-- [process] M1 5 사이클 전체 회고 — 사이클 0 (셋업) → 1 (자료구조 39테) → 2 (ADT 13테) → 3 (해석기 16테) → 4 (통합 6테) → 5 (ctx.spawn + examples 3테). _각 사이클이 다음 사이클의 기반_ 이라 의존성 깊이가 자연 증가. TDD 가 _각 사이클의 의도를 테스트로 박는_ 일관 도구. 누적 77 테스트, examples 동작.
+- [process] M1 5 사이클 전체 회고 — 사이클 0 (셋업) → 1 (자료구조 39테) → 2 (ADT 13테) → 3 (해석기 16테) → 4 (통합 6테) → 5 (ctx.spawn + examples 3테). _각 사이클이 다음 사이클의 기반_ 이라 의존성 깊이가 자연 증가. TDD 가 _각 사이클의 의도를 테스트로 적는_ 일관 도구. 누적 77 테스트, examples 동작.
+
+### 2026-05-09 — M2 사이클 1 (Behaviors.receiveSignal fluent 빌더)
+
+- [api] Akka Typed 의 `Behaviors.receive(...).receiveSignal(...)` 모양 — `ReceiveBehavior<Msg>` interface 가 ADT 의 `Receive` 케이스 역할 + `receiveSignal` 메서드 부착. union ADT 안에 _메서드 부착 케이스_ 가 들어가도 `_tag` 분기 그대로 동작. _불변_ 으로 새 객체 반환 (handle 보존, onSignal 만 갱신).
+- [api] `onSignal` 을 _명시 null_ 로 표현 — `optional` 보다 `null` 이 _명시적으로 비어 있음_ 을 ADT 패턴 매칭에서 누락 없이 체크. `current.onSignal !== null` 한 줄 분기.
+- [process] M1 의 _Receive 케이스_ 가 `onSignal` 추가만으로 _기존 사용처 무 회귀_ — interpreter 의 case "Receive" 분기가 readonly 필드 추가 무관. ADT 확장은 _필드 추가_ 가 _필드 변경_ 보다 항상 안전.
+
+### 2026-05-09 — M2 사이클 2 (interpreter 신호 우선 폴링)
+
+- [effect-ts] _signal 우선 폴링_ 패턴: `Queue.poll(signalQueue)` 로 _이미 도착한_ signal 우선 → 비었으면 `Effect.race(Queue.take(sig), Queue.take(msg))`. race winner 결정 시 loser take 자동 interrupt. Queue 항목 소실 X. 동시 도착 시 비결정성 — 사이클 2 단계는 OK (Akka 도 비슷).
+- [api] `interpretSignalStep` 가 `interpretStep` 과 _대칭 시그너처_ — `(current, ctx, signal) => BehaviorEffect<Msg>`. onSignal 미부착 → current 그대로 (Akka unhandled). DeathPact 검출은 M3 까지 미룸.
+- [process] 사이클 2 의 _첫 Red_ 가 vitest timeout (~20s) — signal 만 들어 있는 케이스에서 mailbox blocking 영원. Green 후 0.5s. 테스트 fail 의 _시간 비용_ 이 _구현 의도_ 를 반영하면 OK (의도된 blocking).
+
+### 2026-05-09 — M2 사이클 3 (PostStop 자동 emit + shutdown 흐름)
+
+- [architecture] PostStop 의 _자동 emit 패턴_: messageLoop 가 _lastActive_ Receive 추적 → 자발 Stopped 도달 시 `interpretSignalStep(lastActive, PostStop)` 자동 호출. 외부 `Queue.offer(signalQueue, PostStop)` 도 같은 메커니즘 — `postStopHandled` 플래그로 _한 번만_ 보장. Akka ActorCell 의 _stop hook_ 정확 매핑.
+- [architecture] 자발 Stopped 의 _마지막 active Receive_ 가 PostStop 받음 — stage1 → stage2 변환 후 stage2.handle 이 Stopped 반환하면 stage2.onSignal 이 호출 (stage1 아님). 이게 Akka 의 _현재 Behavior_ 의미와 정확.
+- [architecture] ADR-021 §3.8 _두 cleanup 모델 우선순위_ 가 코드로 명확 — shutdown 흐름: status=stopped → PostStop offer → fiber.await (사용자 hook 평가) → Scope.close (자동 cleanup) → Queue.shutdown → unregister. _명시 hook 먼저, 자동 cleanup 나중_ 한 줄.
+- [process] 사이클 2 의 기존 테스트가 사이클 3 의 _의미 변경_ 으로 회귀 — PostStop 이 _특수 종료 트리거_ 가 됨. 테스트 의도가 _signal 우선_ 이라 신호를 PostStop 에서 PreRestart 로 교체. _의미 변경 = 테스트 의도 표현 갱신_, 회귀 아님.
+- [architecture/?] _자식 actor 의 PostStop hook_ 은 _아직_ 호출 안 됨 — 부모 Scope.close 시 자식 fiber 가 interrupt 로 강제 종료 (catchAllCause 흡수, messageLoop 정상 종료 못함). cascade stop 흐름에서 자식들의 PostStop 도 호출되도록 _M3 의 ctx.stop_ 또는 _M2 후속_ 에서 보강. examples/01 의 reporter 자식이 이 케이스.
+
+### 2026-05-09 — M2 사이클 4 (examples/02-lifecycle + DoD 마무리)
+
+- [api] examples/02 가 _setup + PostStop_ 두 핵심을 한 화면. `counter(n)` 의 onSignal 이 closure 의 `n` 잡음 — 마지막 active counter 의 n (=2) 이 PostStop 으로 전달. _Behavior 매개변수_ 패턴이 _상태 + cleanup_ 자연 표현.
+- [process] M2 4 사이클 회고 — 사이클 1 (ADT/빌더 6테) → 2 (interpreter 폴링 8테) → 3 (PostStop 흐름 8테) → 4 (examples + DoD). 누적 99 테스트 (+22). _사이클 2 의 race 비결정성_ 과 _사이클 3 의 의미 변경 회귀_ 가 두 번의 _Akka 의미 결정_ 지점. TDD 가 의미 결정의 _코드화 도구_.
+- [process] 코드 작업 끝 + _사용자 측 도그푸딩_ 단계 — poly-phony 에서 한 agent 만들어보면서 발견된 issue 가 후속 사이클 입력. _문서/코드 모두_ 정합성 유지를 도그푸딩 단계에서 부딪힘 (ADR-024).
+
+### 2026-05-09 — M2 끝 도그푸딩 #1 (poly-phony 보류 입력) → ADR-028~031
+
+- [process] 도그푸딩 #1 의 _진짜 가치_ 가 _코드 작성 안 하고 4 결정 입력_ 만 들고 돌아온 것. ADR-024 의 _토대 검증_ 정신 그대로. _첫 사용자 한 명_ 이 라이브러리 표면을 흔들지 않도록 _ADR-028 잣대_ (1차 Akka 정통 / 2차 EffectTS typed / 3차 도그푸딩 boilerplate 사용자 측) 박힘 — 다음 결정의 재발견 비용 0.
+- [api] poly-phony 의 _4 결정_ 중 라이브러리 표면 수용 = #1 ask 자체, #4 ctx.stop cascade graceful. 거절 = #2 typed reply err (Akka untyped), #3 watch+ask 통합 (Akka 분리), #6 Stream pass-through (Akka 별도 패턴). _거절_ 들은 사용자 측 wrapper 5-10 줄로 자연 표현 — ADR-028 의 3차 잣대.
+
+### 2026-05-09 — M3 사이클 1 (ctx.stop graceful cascade)
+
+- [architecture] `stopActor` 가 _재사용 가능 helper_ — ctx.stop / sys.shutdown / (M4) supervision restart 의 일부 모두 같은 흐름. children 재귀 stop + 자식 PostStop hook 호출까지 await + 자기 PostStop + Scope cleanup + watchers 알림 + unregister. M2 LEARNINGS §11 의 _자식 PostStop 미호출_ 정확히 해결.
+- [effect-ts] `Effect.forEach(items, fn, { concurrency: "unbounded", discard: true })` — 자식들 _병렬 stop_ + 결과 무시. Akka 도 자식들끼리 순서 보장 X.
+- [architecture] _부모.children 정리_ 는 stopActor 가 STM tx 안에서 — `ActorPath.parent(entry.path)` 로 부모 path 추출. root 면 None — 분기.
+
+### 2026-05-09 — M3 사이클 2 (watch / watchWith / unwatch + Terminated)
+
+- [architecture] watch 의 _ABA 안전_ 본질 — watcher.uid !== entry.uid 면 알림 안 감. _옛 incarnation 의 watch_ 가 _새 incarnation 의 stop_ 으로 잘못 트리거되지 않음. (path, uid) 양방향 TMap 의 정확한 의미.
+- [api] watchWith 의 _자기 메시지 채널_ 표현력 — signal 보다 자연. 사용자 ADT 에 케이스 추가하면 _domain language_ 그대로 (예: `WorkerGone` ADT). 도그푸딩 측면에서 watch 보다 watchWith 가 _주력 표면_ 일 가능성.
+- [architecture] _이미 죽은 ref watch_ → 즉시 self 에게 알림 (Akka 정통). watchOther 가 stale 분기 — Custom/Terminated 만 발사, Deferred case 는 watchTerminatedOther 가 자체 처리.
+
+### 2026-05-09 — M3 사이클 3 (ctx.watchTerminated Effect 형태)
+
+- [api] WatchMessage 에 _Deferred case_ 추가 — 임시 actor 없이 _Deferred 직접 등록_. 사이클 4 의 ask 와 다른 패턴 (ask 는 reply 가 _임의 타입_ 이라 actor 형태 필요, watchTerminated 는 _시그너처 void_ 라 Deferred 직접). 표면 작아짐.
+- [process] 사이클 3 이 _Red 단계 안 거침_ — 구현이 placeholder 없이 한 번에. TDD 의 _의도 검증_ 은 Green 통과로 보장 — 단 forward-declare 효과는 사이클 1/2 의 placeholder 패턴에서 받음. _작은 사이클은 Red 생략 OK_.
+
+### 2026-05-09 — M3 사이클 4 (ctx.ask)
+
+- [effect-ts] `Effect.race` 의 _함정_: 첫 _success_ winner. fail 은 무시 (다른 쪽 기다림). _timeout fail 패턴_ 엔 `Effect.timeoutFail({ duration, onTimeout: () => Err })` 또는 `Effect.raceFirst` 사용. 첫 구현 시 race 로 짰다가 _timeout 테스트 fail_ 로 발견.
+- [api] `ctx.ask` 가 actor handler 안에서만 동작 — `ref.ask` (외부 호출) 는 _ActorSystemHandle 의 spawn helper_ 필요. 사이클 4 단순화로 미룸. 도그푸딩 측면에서 _대부분 ask 가 actor 안_ 이라 우선순위 낮음. 외부 호출은 _bootstrap actor_ 우회.
+- [architecture] 임시 actor 의 _자동 cleanup_ — `Effect.ensuring(stopActorByRef(tempRef))` 정상/timeout 둘 다 보장. Behaviors.stopped() 자발 종료 + _명시 stop_ idempotent (status 이미 stopped, queue close 안전, fiber.await 즉시 끝).
+
+### 2026-05-09 — M3 사이클 5 (ChildFailed + DeathPact)
+
+- [api] runInterpreter 의 _optional onFailure hook_ — supervision 외피의 cause 를 부모에게 ChildFailed 발사 통로. 정상 종료 (자발 Stopped) 시 호출 안 됨. _interpreter 와 system 의 의존 분리_ 유지 (interpreter 가 system 모름).
+- [architecture] DeathPact 의 _두 검출 경로_ — onSignal 미부착 + Terminated, 또는 onSignal 결과 Unhandled + Terminated. 둘 다 fail 채널에 DeathPactException → supervision 외피 catchAllCause 흡수 → notifyParentOfChildFailure → 부모 ChildFailed. _연쇄 자연_.
+- [process] 도그푸딩 측면에서 DeathPact _주의_ — watch 한 actor 에 onSignal 미부착이면 _자동 자살_. 부모 monitor 만 원하면 `.receiveSignal((_, _) => Effect.succeed(Behaviors.same()))` 명시 무시 처리 권장. USAGE §11.8 항목.
+
+### 2026-05-09 — M3 사이클 6 (examples + DoD)
+
+- [process] M3 6 사이클 회고 — 사이클 1 (stop 4테) → 2 (watch 4테) → 3 (watchTerminated 2테) → 4 (ask 3테) → 5 (ChildFailed/DeathPact 3테) → 6 (examples). 누적 115 테스트 (+16). _ADR-028~031 잣대_ 박힌 후라 의미 결정 _재발견 비용 0_ — 사이클 5 의 DeathPact 는 ADR-022 정신 그대로 직진.
+- [api] examples/04-ask 의 typed err wrapper 패턴이 _도그푸딩 측 표면_ 의 본보기. raw `ctx.ask` + `Effect.flatMap(r => r._tag === "Found" ? Succeed : Fail(domainErr))` — 5줄. ADR-028 의 _3차 잣대_ (도그푸딩 boilerplate 사용자 측) 가 _실제로 보일 정도 단순함_.
+
+### 2026-05-09 — DX 우려: yield/generator 누락
+
+- [process/?] Effect.gen 안 yield* 누락 = silent bug 우려 사용자 제기. _gen 의 가독성 이득_ 이 _pipe 의 안전성_ 보다 큼 (사용자 의견 + 동의) → pipe 일괄 변환 안 함.
+- [tooling] `@effect/eslint-plugin@0.3.2` 존재 검증 — 단 rule 은 `dprint` + `no-import-from-barrel-package` 두 개만. _yield 누락 잡는 rule 없음._ 사용자 _기능 없음_ 추측 정확 (이전 응답에서 hallucination 으로 _잡음_ 이라 한 거 정정).
+- [tooling/?] AST 기반 typescript-eslint custom rule (`@typescript-eslint/no-floating-promises` 패턴 흉내) _기술적 가능_ — 약 200줄 type-aware. 단 도그푸딩 #2 에서 _실제 빈도_ 확인 후 (b) internal rule / (a) 별도 패키지 / (c) EffectTS PR 결정. 미리 만들면 도그푸딩에서 안 쓰이면 낭비.
+- [tooling] 룰베이스 (정규식) 는 _Effect 가 의미 단위_ 라 type 검사 필요 → false positive 큼. 실용성 0.
+
+### 2026-05-09 — effect 의존성 분류 (peerDep)
+
+- [tooling] effect 같은 _라이브러리 런타임 패키지_ 는 항상 `peerDependencies` — 사용자와 _같은 module 인스턴스_ 공유해야 actor Fiber/Scheduler 가 동작. `dependencies` 에 두면 두 인스턴스 install 위험. pnpm hoist 가 보호하지만 _확실 보장은 peerDep_. (도그푸딩 #2 진입 직전 사용자 지적으로 정정 — ADR-033)
+- [tooling] 라이브러리 패키지 검증 환경 (devDep) 과 호환 범위 (peerDep) 를 _분리_. devDep = ^3.21.0 (현재 검증), peerDep = ^3.10.0 (호환 범위 넓게). 우리가 새 API 쓰면 peerDep 하한 같이 올림.
+
+### 2026-05-09 — 도그푸딩 #2 사이클 0 (poly-phony probe)
+
+- [tooling] `file:../../../effect-actor` + `exports: { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } }` 조합이 poly-phony vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader 설정/build step 없이 30줄 probe 통과 (ActorSystem.create + Behaviors.receiveMessage + tell + Behaviors.same + sys.shutdown). ADR-032 의도 그대로.
+- [tooling] effect 단일 인스턴스 보장 확인 — poly-phony 측 effect@3.21.2 가 root node_modules에 hoist, effect-actor symlink 가 그것을 가리킴. ADR-033 의 peerDep 의도 실제 검증.
+- [tooling] poly-phony _기존_ peerDep 충돌 (`@effect/vitest@0.29.0` peerDep `vitest ^3.2.0` ↔ root `vitest ^4.1.5`) 이 file: dep 추가 시 npm 재해석으로 노출. effect-actor 무관. `--legacy-peer-deps` 우회 — poly-phony 쪽 후속 정리.
+
+### 2026-05-09 — 도그푸딩 #2 사이클 2 (LLMBackend.Generate, Stream pass-through)
+
+- [api] Stream pass-through wrapper (가이드 §wrapper #6) 정상 동작 — `replyTo: ActorRef<{ _tag: "Stream", stream }>` 패턴으로 reply 메시지에 `Stream` 객체 자체 담아 전달. caller는 `ctx.ask` → `Effect.map(r => r.stream)` 후 `Stream.runCollect`로 소비. 패턴 자체 5줄, 직관적.
+- [effect-ts] **`BehaviorEffect<Msg> = Effect.Effect<Behavior<Msg>, unknown>` 의 R=never 강제가 도메인 코드에 마찰점.** `Mailbox.make()` (Scope 필요), `Effect.fork` (parent fiber scope) 등 Scope 의존하는 effect를 핸들러 안에서 못 씀. 우회 패턴: 핸들러 진입 시 `Scope.make()` 명시 생성 → `Mailbox.make().pipe(Scope.extend(scope))` → `Effect.forkDaemon` (parent와 무관) → 작업 끝 `Effect.ensuring(Scope.close(scope, Exit.void))`. 약 8줄 boilerplate가 LLM 호출 한 번마다 추가됨. 잦으면 helper 추출 후보.
+- [api] HttpClient 같은 Effect 컨텍스트 의존성은 **factory 수준에서 yield하고 closure로 캡처** 해야 함. `makeBackendBehavior(opts): Effect<Behavior<BackendMsg>, never, HttpClient>` 형태. 핸들러 안에서 `yield* HttpClient.HttpClient` 못 함 (R=never). 캐치는 명확하나, 도메인 actor가 외부 자원 의존하는 경우 factory 패턴 강제됨 — 가이드/USAGE에 한 줄 정도 명시되면 도그푸딩 마찰 줄어듦.
+- [api] error axis 분리 (Effect 채널 = AskTimeout / Stream 채널 = BackendError) 가 새 표면에서도 깔끔히 유지됨. ctx.ask가 Effect.fail로 BackendError를 만들지 않아도 됨 — Stream 객체 안에 묶여 caller가 소비할 때만 surface.
+- [effect-ts] `Effect.forkDaemon` + `Effect.ensuring(Scope.close)` 패턴 — daemon fork가 parent fiber 스코프 밖이라 handler return 후에도 살아있고, work 완료 시 ensuring이 box 정리. caller가 stream 끝까지 소비하지 않으면 daemon이 끝까지 pump하다 종료 (zombie 가능성 작음). actor stop 시 daemon은 자동 interrupt 안 됨 (의도) — 만약 cascade interrupt 의미론을 바라면 다른 fork 모델 필요.
+- [tooling] flake-free 5회. 96 테스트 (probe + LookupChat + Generate, +6 from baseline).
+- [api/?] _후속 후보_: (1) `Behaviors.layered(layer, factory)` helper — Layer 합성해 R 채널 정리. (2) `ctx.fork(eff)` — instance Scope 안 fork (cascade interrupt). 도그푸딩 _빈도_ 더 보고 ADR 결정.
+
+### 2026-05-09 — 도그푸딩 #2 사이클 3 (Registry-Backend integration)
+
+- [api] **Behavior factory 패턴이 외부 의존성 actor의 표준** — `makeXxxBehavior(opts): Effect<Behavior<XxxMsg>, never, R>` 형태가 Effect 컨텍스트(HttpClient 등) 의존하는 actor에 강제됨. R=never의 BehaviorEffect 안에서 yield 못 하니, factory가 pre-build 후 Behavior만 전달. Registry처럼 자식 actor를 spawn하는 경우, 각 자식 Behavior도 factory 단계에서 미리 빌드해 setup에 closure로 넘김.
+- [api] 자식 Behavior pre-build 패턴이 자연스러움 — Registry 입장에서는 BackendSpec → makeBackendBehavior(opts) → built Behavior 를 Map에 모은 뒤, setup 안에서 `ctx.spawn(beh, name)` 만 호출. setup의 R=never 제약과 깔끔히 맞물림. 도메인 코드 가독성 좋음.
+- [api] **ctx.ask 연쇄 (lookup → generate)** 가 Effect.flatMap으로 자연스럽게 연결됨. error union (BackendNotFound | AskTimeout | BackendError) 가 Effect 채널에서 자동 누적되며, 마지막에 matchEffect로 묶어 Deferred로 빼내는 패턴이 안정적. handler 안에서 여러 ctx.ask가 직렬로 합성되는 일반 시나리오 검증됨.
+- [api] domain-side error union이 점점 길어지는 게 살짝 우려 — agent 깊어질수록 `BackendNotFound | AskTimeout | BackendError | ...` 누적. typed reply error wrapper의 부담은 작지만, 합성 깊이가 깊어지면 helper로 묶고 싶은 욕구. 도그푸딩 더 진행하며 관찰.
+- [tooling] HttpClient 같은 Effect 컨텍스트 자원이 actor tree 전체에 걸쳐 자연스럽게 propagation. Registry factory가 HttpClient 요구 → driver factory도 같은 요구 propagate → 테스트 program에서 한 번 provide 면 끝.
+- [tooling] flake-free 5회. agent layer 4 파일 (probe + registry + backend + integration), 누적 +7 테스트.
+- [process] **사이클 2 의 _후속 후보_ → 사이클 3 _표준 확정_** — factory 패턴이 _빈도 임계_ 넘음. USAGE §4.8 톤을 _후속 검토_ 에서 _표준 패턴_ 으로 격상. `Behaviors.layered` helper 는 _직접 factory 가 충분 깔끔_ 이라 _helper 의 가치 한계_ — 제공 시점 미룸.
+
+### 2026-05-09 — 도그푸딩 #2 사이클 4 (watch+ask wrapper)
+
+- [api] watch+ask race-fail wrapper (가이드 §wrapper) 동작 확인 — `Effect.raceFirst(ctx.ask, ctx.watchTerminated → fail ActorClosed)`. raceFirst 명시 (race는 첫 success winner라 fail 전파 안 됨, 가이드 §11.6 그대로).
+- [api] 외부 ref.ask 부재로 인한 bootstrap pattern — Behaviors.setup<never>의 setup 안에서 spawn + Effect.forkDaemon(ask) + Effect.sleep + ctx.stop 한 번에. setup 완료 시점에 외부 Deferred 기다리는 패턴. 도메인 actor 없이 wrapper 검증할 때 표준 형태.
+- [api] ActorClosed Tagged Error는 poly-phony 측 정의 (ADR-028 거절 항목). path 식별자는 ActorRef.toString(target) — 명시적 helper 노출, 자연스러움.
+
+### 2026-05-09 — 도그푸딩 #2 사이클 5 (cascade shutdown — FINDING)
+
+- **[runtime/!] BUG 후보** — `ctx.spawn` 직후 즉시 `sys.shutdown` 시 children setup이 race에 짐. 관찰 log: `['root', 'child:a:setup', 'child:b:setup']`. root PostStop이 children setup 완료 전 발사되어 cascade가 children에 도달 못 함. children의 PostStop은 영원히 호출 안 됨 (orphan). 100ms 대기 추가하면 정상 cascade (`['child:a:setup', 'child:b:setup', 'child:b:poststop', 'child:a:poststop', 'root']`). ctx.spawn이 fire-and-forget으로 ActorRef만 반환하고 child fiber 시작이 비동기인 것으로 보임. sys.shutdown은 in-flight setup을 기다리지 않음. 실 consumer 입장에서 *spawn 후 즉시 shutdown 시 PostStop이 호출 안 됨* — Akka Typed 의 spawn happens-before contract 위반.
+- [api] 100ms 같은 sleep 우회는 도그푸딩에서만 가능. 실 production에서는 spawn 완료 보장이 필요. 후보 fix: (a) ctx.spawn이 setup 완료까지 await, (b) sys.shutdown이 in-flight spawn drain 후 cascade 시작, (c) Behaviors.setup이 부모의 메시지 처리 차단.
+- [testing] 정상 cascade 시 sibling 순서는 reverse-spawn (LIFO): b의 poststop → a의 poststop. 의도된 의미론인지 ADR-031 명시 필요할 듯.
+
+### 2026-05-09 — 도그푸딩 #2 종합 정리
+
+- [process] 누적 5 사이클, 7 commit, 98/99 테스트 (이전 89 + 9 신규).
+  - cycle 0: probe (file: dep + source-direct + ESM TS loader)
+  - cycle 1: Registry.LookupChat (typed err wrapper)
+  - cycle 2: LLMBackend.Generate (Stream pass-through wrapper)
+  - cycle 3: Registry-Backend integration (factory + ctx.ask 연쇄)
+  - cycle 4: askOrFailIfClosed (watch+ask race wrapper)
+  - cycle 5: cascade shutdown (BUG 후보 발견)
+- [process] 가이드 #2 의 검증 항목 4개 100% 커버.
+  1. wrapper 3종 ✅ (cycle 1, 2, 4)
+  2. ctx.stop graceful cascade ⚠️ 정상 동작 단 spawn race 조건 발견 (cycle 5)
+  3. yield 누락 빈도 — 0건 (5 사이클, 핸들러 ~15개 표본)
+  4. ESM TS loader ✅ (cycle 0)
+- [api] 가이드/USAGE에 명시되면 좋을 항목들:
+  - "외부 자원 의존 actor는 makeXxxBehavior(opts): Effect<Behavior, never, R> factory 패턴 강제" (handler R=never 제약 명시적 안내)
+  - "핸들러 안 Mailbox.make / Effect.fork 같은 Scope 의존 effect는 명시적 Scope.make + forkDaemon + ensuring(Scope.close) 패턴 필요" — 8줄 boilerplate 표면화
+  - "ctx.spawn happens-before contract — 현재 깨짐 / 의도된 비동기인지 결정 필요"
+
+### 2026-05-09 — 도그푸딩 #2 종료 — 후속 사이클 결정
+
+- [process] 도그푸딩 #2 결과 종합 후 effect-actor 측 입력 우선순위:
+  1. **사이클 5 spawn race fix** — 가장 무게. 후속 사이클 1 (M3 보강) 즉시 진입. ADR-031 보강 + 새 사이클로.
+  2. yield 누락 빈도 0건 — lint 도구 안 만듦 결정 _확정_ (도그푸딩 실증).
+  3. 나머지 (factory 패턴 표준 / R=never 제약) — USAGE 이미 갱신됨 (사이클 2/3 후 §4.8). 추가 정리 안 함.
+- [api] cycle 5 의 sibling LIFO 순서 — 정상 cascade 흐름은 _Akka 정통_ (마지막 spawn 자식부터 stop). ADR-031 결정 단계에 _명시 안 박힘_ — fix 사이클에서 ADR-031 보강 + 테스트로 명시.
+- [process] 도그푸딩 #2 _가치 검증_ — 5 사이클 / 9 테스트 / 1 BUG 발견. ADR-024 의 _토대 검증_ 정신 그대로. wrapper 3종 의 도메인 부담 5-10줄 데이터, factory 패턴 표준 확정, spawn race 의 production 위험 — 모두 _코드 작성 안 했으면_ 못 잡았을 입력.
+
+### 2026-05-09 — M3.1 사이클 1 (spawn race fix + Effect TMap 버그 발견)
+
+- [runtime] spawn happens-before 보장은 _Deferred latch_ 한 줄로 깔끔. spawnInternal 안에서 `Deferred.make<void, never>` → runInterpreter 가 evaluateInitial 후 `Deferred.succeed` → spawnInternal 의 `Deferred.await(latch)` 로 마감. Setup 평가 도중 fail 도 supervision 외피 catchAllCause 안에서 latch.succeed 보장 → 영원 await 불가. 재귀 spawn (Setup 안 ctx.spawn) 도 같은 보장 자동 전파.
+- [runtime] sibling LIFO cascade — children 자료구조를 HashSet (순서 X) → Chunk (insertion order) 로 바꾸고, stopActor 안 cascade 를 reverse + concurrency:1 sequential forEach 로. 마지막 spawn 자식부터 PostStop. ADR-031 보강.
+- **[effect-ts/!] Effect 3.21.2 의 `TMap.remove` / `TMap.removeAll` 가 broken** — `Chunk.partition` 의 [excluded, satisfying] 반환을 잘못 해석해서 술어 자리에 entry[1] (값) 을 비교하거나 (`remove`), 결과 chunk 의 [0] / [1] 을 뒤바꿔 (`removeAll`) bucket 을 _완전히 잘못 갱신_. hash 충돌이 일어난 같은 bucket 의 다른 엔트리들이 한꺼번에 사라짐. Registry 의 키들 (`actor://demo/user`, `.../user/a`, `.../user/b`) 이 모두 bucket 13 으로 충돌 → user/b 한 개 unregister 시 user, user/a 도 함께 증발 → cascade 가 "이미 unregister 됐다" 로 silent skip → 첫 자식 PostStop 안 호출 → BUG #5 의 본질.
+- [effect-ts] 우회: `Registry`, `entry.watchers`, `entry.watching` 모두 `TMap` → `TRef<HashMap>` 으로 교체. STM 안에서 atomic 갱신 그대로 가능 (TRef.update + HashMap.set/remove). 의미 동일, API 표면만 `TRef.update((m) => HashMap.set(m, k, v))` 로 약간 길어짐. 사용 빈도 낮은 자료구조라 boilerplate 비용 무시 가능.
+- [effect-ts] `entry.children` 은 이미 `TRef<Chunk>` 라 영향 없음 (TMap 무관).
+- [process] 도그푸딩 #2 사이클 5 의 _spawn race_ 보고가 _두 layer_ 의 결합 — (1) 진짜 spawn happens-before 부재 (latch 로 fix) + (2) TMap.remove 버그가 cascade 흐름의 _silent skip_ 원인. 디버그 console.log 로 _registry 가 unregister 한 번에 텅 빈다_ 는 사실을 발견 안 했으면 latch 만 추가하고 cascade 는 여전히 broken. _도그푸딩의 가치_ 가 두 번째 발견 (TMap 버그) 까지 끌어냄.
+- [process] Effect 본체 버그라 upstream 보고 candidate. 단 검증/PR 일정 별도 → 우선 우회 fix 로 unblock.
 
 

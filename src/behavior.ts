@@ -1,25 +1,34 @@
 import type { Effect } from "effect";
 import type { ActorContext } from "./context.js";
 import { MailboxPolicy } from "./mailbox.js";
+import type { Signal } from "./signal.js";
 
 // Behavior<Msg> ADT — 액터의 _다음 동작_ 을 표현하는 불변 값.
 // 사이클 2: ADT + 빌더 + 메타 추출 (sync 부분). 해석기는 사이클 3.
+// M2 사이클 1: Receive 에 onSignal 추가 + receiveSignal fluent 빌더.
 
 // handler 의 fail 채널은 unknown — supervision 외피 (ADR-020) 가 catchAllCause 로 받음.
 export type BehaviorEffect<Msg> = Effect.Effect<Behavior<Msg>, unknown>;
+
+// Receive 케이스 — fluent receiveSignal 메서드 포함 (Akka Typed Behaviors.receive(...).receiveSignal(...) 모양).
+// onSignal 은 _명시 null_ — 신호 핸들러 미부착.
+export interface ReceiveBehavior<Msg> {
+  readonly _tag: "Receive";
+  readonly handle: (ctx: ActorContext<Msg>, msg: Msg) => BehaviorEffect<Msg>;
+  readonly onSignal:
+    | ((ctx: ActorContext<Msg>, signal: Signal) => BehaviorEffect<Msg>)
+    | null;
+  readonly receiveSignal: (
+    handle: (ctx: ActorContext<Msg>, signal: Signal) => BehaviorEffect<Msg>,
+  ) => ReceiveBehavior<Msg>;
+}
 
 export type Behavior<Msg> =
   | { readonly _tag: "Same" }
   | { readonly _tag: "Stopped" }
   | { readonly _tag: "Empty" }
   | { readonly _tag: "Unhandled" }
-  | {
-      readonly _tag: "Receive";
-      readonly handle: (
-        ctx: ActorContext<Msg>,
-        msg: Msg,
-      ) => BehaviorEffect<Msg>;
-    }
+  | ReceiveBehavior<Msg>
   | {
       readonly _tag: "Setup";
       readonly init: (ctx: ActorContext<Msg>) => BehaviorEffect<Msg>;
@@ -35,6 +44,18 @@ const STOPPED: Behavior<never> = { _tag: "Stopped" };
 const EMPTY: Behavior<never> = { _tag: "Empty" };
 const UNHANDLED: Behavior<never> = { _tag: "Unhandled" };
 
+const makeReceive = <Msg>(
+  handle: (ctx: ActorContext<Msg>, msg: Msg) => BehaviorEffect<Msg>,
+  onSignal:
+    | ((ctx: ActorContext<Msg>, signal: Signal) => BehaviorEffect<Msg>)
+    | null,
+): ReceiveBehavior<Msg> => ({
+  _tag: "Receive",
+  handle,
+  onSignal,
+  receiveSignal: (next) => makeReceive(handle, next),
+});
+
 export const Behaviors = {
   same: <Msg>(): Behavior<Msg> => SAME,
   stopped: <Msg>(): Behavior<Msg> => STOPPED,
@@ -43,14 +64,11 @@ export const Behaviors = {
 
   receive: <Msg>(
     handle: (ctx: ActorContext<Msg>, msg: Msg) => BehaviorEffect<Msg>,
-  ): Behavior<Msg> => ({ _tag: "Receive", handle }),
+  ): ReceiveBehavior<Msg> => makeReceive(handle, null),
 
   receiveMessage: <Msg>(
     handle: (msg: Msg) => BehaviorEffect<Msg>,
-  ): Behavior<Msg> => ({
-    _tag: "Receive",
-    handle: (_ctx, msg) => handle(msg),
-  }),
+  ): ReceiveBehavior<Msg> => makeReceive((_ctx, msg) => handle(msg), null),
 
   setup: <Msg>(
     init: (ctx: ActorContext<Msg>) => BehaviorEffect<Msg>,

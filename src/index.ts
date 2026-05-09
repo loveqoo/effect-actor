@@ -16,6 +16,8 @@ export { Cell, MailboxPolicy } from "./mailbox.js";
 // 에러 (Tagged)
 export {
   ActorNotFound,
+  AskTimeout,
+  DeathPactException,
   IncarnationMismatch,
   MailboxFull,
 } from "./errors.js";

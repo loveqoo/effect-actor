@@ -3,7 +3,7 @@
 > _색인 + 게시판_. 각 마일스톤의 _현재 상태_ 를 한눈에.
 > 자세한 내용은 다른 문서(API, ARCHITECTURE)를 참조하고, 여기는 _진행 상황_ 만.
 >
-> _2026-05-09 plan-eng-review 결과 반영. ADR-016~026 박힘._
+> _2026-05-09 plan-eng-review 결과 반영. ADR-016~026 정해짐._
 
 ---
 
@@ -13,8 +13,9 @@
 |---|---|---|
 | M0. 정보 모으기 | 🟢 완료 | docs/ 묶음 작성. AGENTS.md 색인 |
 | M1. 최소 동작 + setup | 🟢 완료 | spawn / tell / receive + setup + ctx.spawn (Stable ref + Mailbox 분리). 77 테스트, examples/01 동작. |
-| M2. Lifecycle | 🟡 다음 | PostStop + 도그푸딩 시작 (ADR-024) |
-| M3. Stop + Watch | ⚪ 대기 | ctx.stop / watch / Terminated / ChildFailed |
+| M2. Lifecycle | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook (자동 + 외부 emit). 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계. |
+| M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. 115 테스트, examples/03,04 동작. ⚠️ _후속 사이클 1: spawn race fix_ (도그푸딩 #2 발견) |
+| M3.1. spawn race fix | 🟡 다음 | 도그푸딩 #2 사이클 5 발견 — spawn 후 즉시 shutdown 시 children PostStop 누락. ADR-031 보강 + happens-before contract |
 | M4. Restart | ⚪ 대기 | Supervision strategies (resume/restart/stop) |
 | M5. 고급 기능 | ⚪ 대기 | Backoff / withLimit / Stash / Timer |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
@@ -38,7 +39,7 @@
 이 단계가 끝나면 _계획 리뷰_ 단계로 넘어간다.
 
 - [x] `/plan-devex-review` — 2026-05-08 (DX SCORECARD 작성)
-- [x] `/plan-eng-review` — 2026-05-09 (ADR-016~026 박힘. ARCHITECTURE 모순 해결)
+- [x] `/plan-eng-review` — 2026-05-09 (ADR-016~026 정해짐. ARCHITECTURE 모순 해결)
 
 ---
 
@@ -110,36 +111,58 @@
 - DeathPact 정책 (Terminated 미처리 시 자기도 실패) 의 _signal 검출 로직_ — M3까지 미룸
 
 **마일스톤 완료 조건 (DoD):**
-- [ ] `examples/02-lifecycle.ts` — setup + PostStop 로 자원 초기화/정리하는 액터
-- [ ] **도그푸딩 시작 (~1주, ADR-024)** — poly-phony 에서 한 agent 만들어보기. M1~M2 토대 검증 (incarnation/cell ref/Scope/STM/setup/PostStop). 발견된 issue 는 LEARNINGS.md + 후속 사이클 입력.
+- [x] `examples/02-lifecycle.ts` — setup + PostStop 로 자원 초기화/정리하는 액터 (counter + 마지막 값 PostStop 보고)
+- [x] **도그푸딩 #1 + #2 완료 (ADR-024)** — #1 = 4 결정 입력 (ADR-028~031). #2 = 5 사이클 / 9 테스트 / 1 BUG 발견 (spawn race). 토대 검증 통과, 후속 사이클 입력 누적.
+
+**완료된 사이클:**
+- 🟢 사이클 1 — `Behaviors.receive(...).receiveSignal(...)` fluent 빌더 + `ReceiveBehavior<Msg>` ADT (onSignal 필드) + 6 테스트
+- 🟢 사이클 2 — `interpretSignalStep` + `messageLoop` signal 우선 폴링 (Queue.poll + Effect.race) + 8 테스트
+- 🟢 사이클 3 — PostStop 자동 emit (_lastActive_ 추적, 자발 Stopped + 외부 PostStop 양 케이스) + `system.shutdown` 의 PostStop offer 흐름 + 8 테스트
+- 🟢 사이클 4 — `examples/02-lifecycle.ts` (setup + PostStop) 동작 + DoD 4/5 충족 (도그푸딩 _시작_ 은 사용자 측)
 
 ---
 
-## M3. Stop + Watch
+## M3. Stop + Watch + Ask
+
+> _2026-05-09 도그푸딩 #1 입력 반영 → ADR-028~031 추가._
 
 **이 시점에 사용자가 할 수 있는 것:**
-- `ctx.stop(child)` 로 자식 종료
+- `ctx.stop(child)` 로 자식 종료 — _graceful_ (자식 cascade + PostStop 호출, ADR-031)
 - `ctx.watch(other)` / `watchWith` 로 다른 액터 감시 (ADR-022)
+- `ctx.watchTerminated(other): Effect<void>` 로 _Effect 형태 termination await_ (ADR-030)
 - Terminated / ChildFailed 신호 처리
-- ask 패턴 사용
+- `ref.ask(make, timeout): Effect<Resp, AskTimeout>` 또는 `ctx.ask(target, make, timeout)` — Akka 정통 untyped err (ADR-029)
 
 **포함:**
-- `ctx.stop`
+- `ctx.stop` (graceful cascade — ADR-031)
 - `ctx.watch` / `ctx.watchWith` / `ctx.unwatch` (TMap<{path, uid}, WatchMessage> 양방향 — ADR-022)
+- `ctx.watchTerminated(other)` — Effect 형태 노출 (ADR-030)
 - Signal 확장: `Terminated`, `ChildFailed`
 - DeathPact (미처리 시 자살)
-- ask 패턴 (임시 actor + Deferred + timeout — ask temp actor 의 instance Scope 자기 소유 — ADR-021)
-- 부모-자식 cascade stop
+- ask 패턴 (임시 actor + Deferred + timeout — ask temp actor 의 instance Scope 자기 소유 — ADR-021, ADR-029)
+- shutdown 흐름 graceful 갱신 (ADR-031: 자식 cascade + PostStop hook 호출 + Fiber.await)
 
 **도전 과제:**
+- ctx.stop 의 _children TRef 순회_ + Fiber.awaitAll 합성 — STM 안에서 children 스냅샷 후 순회
 - watchKey (path, uid) 인스턴스 비교 정확성 (ADR-016, ADR-022)
-- ask 의 임시 actor 명명 / 정리 보장 (ADR-021 Scope)
+- ask 의 임시 actor 명명 (`$ask-N` 같은 자동 부여) + 정리 보장 (ADR-021 Scope)
+- ask 의 임시 actor 가 `Deferred` 에 응답 set, fiber 가 await — Effect.race(Deferred.await, sleep(timeout))
 - ChildFailed 의 cause 표현 (EffectTS Cause<E> 그대로 노출?)
 
 **마일스톤 완료 조건 (DoD):**
-- [ ] `examples/03-watch.ts` — 자식 감시하는 부모. ABA 안전성 (재spawn 후 옛 watcher 잘못된 Terminated 안 받음) 검증
-- [ ] `examples/04-ask.ts` — ask 패턴 + timeout
-- [ ] **M3 끝 도그푸딩 (~1주, ADR-024)** — watch + ask 조합 의미 검증.
+- [x] `examples/03-watch.ts` — watchWith + ctx.stop graceful (자식 종료 알림 + 메시지 채널)
+- [x] `examples/04-ask.ts` — ask 패턴 + AskTimeout 캐치
+- [x] `ctx.stop` 의 graceful cascade 동작 (자식 PostStop 호출 검증, ADR-031)
+- [x] DeathPact 검출 (watch + Unhandled Terminated → fail → 부모 ChildFailed 연쇄, ADR-022)
+- [ ] **M3 끝 도그푸딩 (~1주, ADR-024)** — watch + ask 조합 의미 + poly-phony 의 4 결정 wrapper 검증. _코드 작업 끝, 사용자 측 도그푸딩 단계._
+
+**완료된 사이클:**
+- 🟢 사이클 1 — `ctx.stop(child)` graceful cascade (ADR-031): stopActor 재사용 가능 helper, sys.shutdown 도 같은 흐름. 4 테스트
+- 🟢 사이클 2 — `ctx.watch / watchWith / unwatch` (ADR-022) + Terminated signal: 양방향 TMap, ABA 안전 검증. 4 테스트
+- 🟢 사이클 3 — `ctx.watchTerminated(other): Effect<void>` (ADR-030): WatchMessage 의 Deferred case 추가, 임시 actor 우회 안 함. 2 테스트
+- 🟢 사이클 4 — `ctx.ask` (ADR-029): 임시 actor + Deferred + Effect.timeoutFail. typed err wrapper 패턴 검증. 3 테스트
+- 🟢 사이클 5 — ChildFailed signal + DeathPact: runInterpreter 의 onFailure hook + interpretSignalStep 의 unhandled 검출. 3 테스트
+- 🟢 사이클 6 — `examples/03-watch.ts` + `examples/04-ask.ts` + USAGE.md 갱신. 누적 115 테스트.
 
 ---
 
@@ -219,7 +242,7 @@
 - npm 패키지 이름 결정 (`@loveqoo/effect-actor` 후보)
 - 첫 배포 직전 `/devex-review`, `/codex review`, `/health` 통과
 - README / CHANGELOG / docs 영어판 (비공식적으로는 한국어 docs 그대로, 영어 README 별도)
-- **semver 정책 확정** (현재 미정 — F6 결정에 따라 M∞ 직전에 ADR 로 박음. 후보: `0.x = minor 가 breaking, patch 는 fix-only / 1.0+ = SemVer`)
+- **semver 정책 확정** (현재 미정 — F6 결정에 따라 M∞ 직전에 ADR 로 정함. 후보: `0.x = minor 가 breaking, patch 는 fix-only / 1.0+ = SemVer`)
 - 영어 README 작성 (한국어 docs/ 그대로)
 - CONTRIBUTING.md / ISSUE_TEMPLATE / PR template 추가
 
@@ -258,7 +281,7 @@
 
 **Round 2 (2026-05-09, plan-eng-review codex)**: 10개 발견 (Critical 4, Important/Strategy 6) — round 1 결정에 대한 교차 검증.
 
-전부 결정되어 **ADR-016 ~ ADR-026** 으로 박힘.
+전부 결정되어 **ADR-016 ~ ADR-026** 으로 정해짐.
 
 | Round | # | 발견 | 결정 ADR |
 |---|---|---|---|
@@ -324,7 +347,7 @@
 
 **리뷰 결과 요약:**
 - 현재 평균 ~3.9/10 → F1-F6+plan-eng-review 후 ~5.7/10 → M5+M∞ 후 ~7.5/10.
-- ADR-016~026 박힘으로 _ARCHITECTURE 모순_ 없음 → M1 진입 안전.
+- ADR-016~026 정해짐으로 _ARCHITECTURE 모순_ 없음 → M1 진입 안전.
 - M2 끝 도그푸딩 시작 (ADR-024) 으로 토대 검증 _이른 시점_.
 
 **처리된 결정 (모든 세션):**
@@ -354,12 +377,12 @@ _plan-eng-review round 2 (2026-05-09):_
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | 범위 & 전략 | 0 | — | — |
 | Codex Review | `/codex review` | 독립 2nd opinion | 0 | — | — |
-| Eng Review | `/plan-eng-review` | 아키텍처 & 테스트 (필수) | 1 | clean | ADR-016~026 박힘. 20개 결정 모두 처리 (round 1 + 2 outside voice). M1 진입 안전. |
+| Eng Review | `/plan-eng-review` | 아키텍처 & 테스트 (필수) | 1 | clean | ADR-016~026 정해짐. 20개 결정 모두 처리 (round 1 + 2 outside voice). M1 진입 안전. |
 | Design Review | `/plan-design-review` | UI/UX (해당 없음, 라이브러리) | 0 | n/a | n/a |
 | DX Review | `/plan-devex-review` | 개발자 경험 | 1 | issues_found | overall 3.9/10 → 5.7 (예상). Critical 5개 plan-eng-review 로 이관. F1-F6 처리됨. |
 | Outside Voice (Codex) | `/codex review` (plan-eng-review 안) | 독립 plan 검증 | 1 | issues_found→resolved | round 2 에서 10개 새 발견 모두 결정. |
 
-- **OUTSIDE VOICE (Codex):** 2회 실행 (round 1 plan-devex-review, round 2 plan-eng-review). 총 20개 발견 모두 ADR 박힘.
+- **OUTSIDE VOICE (Codex):** 2회 실행 (round 1 plan-devex-review, round 2 plan-eng-review). 총 20개 발견 모두 ADR 정해짐.
 - **CROSS-MODEL:** Codex 와 Claude 발견은 _상충 X, 보완_ — Claude 는 DX/표면 (README, examples, 에러 어휘), Codex 는 아키텍처 근본 + 결정 교차 검증.
 - **UNRESOLVED:** 0 (모두 결정).
 - **VERDICT:** **CLEARED** — Eng Review (plan) 1회 clean. M1 진입 가능. _ARCHITECTURE 모순 없음._

@@ -3,11 +3,25 @@ import { Effect, Queue } from "effect";
 import { Behaviors } from "../src/behavior.js";
 import { ActorContext } from "../src/context.js";
 import { ActorEntry } from "../src/entry.js";
-import { interpretStep, runInterpreter } from "../src/interpreter.js";
+import {
+  interpretSignalStep,
+  interpretStep,
+  runInterpreter,
+} from "../src/interpreter.js";
 import { Cell } from "../src/mailbox.js";
 import { ActorPath } from "../src/path.js";
 import { ActorRef } from "../src/ref.js";
-import { stubSpawn, stubSystem } from "./helpers.js";
+import { Signal } from "../src/signal.js";
+import {
+  stubAsk,
+  stubSpawn,
+  stubStop,
+  stubSystem,
+  stubUnwatch,
+  stubWatch,
+  stubWatchTerminated,
+  stubWatchWith,
+} from "./helpers.js";
 
 const run = <A, E>(eff: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(eff);
@@ -17,7 +31,17 @@ const makeCtx = <Msg>() =>
     const path = ActorPath.child(ActorPath.root("test-sys"), "x");
     const cell = yield* Cell.make<Msg>();
     const self = ActorRef.make({ path, uid: "u", cell, system: stubSystem });
-    return ActorContext.make({ self, system: stubSystem, spawn: stubSpawn });
+    return ActorContext.make<Msg>({
+      self,
+      system: stubSystem,
+      spawn: stubSpawn,
+      stop: stubStop,
+      watch: stubWatch,
+      watchWith: stubWatchWith,
+      unwatch: stubUnwatch,
+      watchTerminated: stubWatchTerminated,
+      ask: stubAsk,
+    });
   });
 
 describe("interpretStep — 종결자 transition", () => {
@@ -159,6 +183,12 @@ const makeEntryAndCtx = <Msg>(uid: string = "u") =>
       self,
       system: stubSystem,
       spawn: stubSpawn,
+      stop: stubStop,
+      watch: stubWatch,
+      watchWith: stubWatchWith,
+      unwatch: stubUnwatch,
+      watchTerminated: stubWatchTerminated,
+      ask: stubAsk,
     });
     return { entry, ctx };
   });
@@ -235,6 +265,286 @@ describe("runInterpreter — Setup 평가 + loop + Stopped 종료", () => {
         yield* runInterpreter(counter(0), entry, ctx);
 
         expect(calls).toBe(4);
+      }),
+    ));
+});
+
+describe("interpretSignalStep — 신호 분기 (M2 사이클 2)", () => {
+  it("onSignal 없는 Receive 면 current 그대로 — 신호 무시 (Akka unhandled)", () =>
+    run(
+      Effect.gen(function* () {
+        const ctx = yield* makeCtx<string>();
+        const b = Behaviors.receive<string>(() =>
+          Effect.succeed(Behaviors.same()),
+        );
+        const next = yield* interpretSignalStep<string>(
+          b,
+          ctx,
+          Signal.PostStop,
+        );
+        expect(next).toBe(b);
+      }),
+    ));
+
+  it("Same/Empty/Stopped/Unhandled/Setup 도 신호에 대해 current 그대로 (사이클 2 default)", () =>
+    run(
+      Effect.gen(function* () {
+        const ctx = yield* makeCtx<string>();
+        for (const b of [
+          Behaviors.same<string>(),
+          Behaviors.empty<string>(),
+          Behaviors.stopped<string>(),
+          Behaviors.unhandled<string>(),
+        ]) {
+          const next = yield* interpretSignalStep<string>(
+            b,
+            ctx,
+            Signal.PostStop,
+          );
+          expect(next).toBe(b);
+        }
+      }),
+    ));
+
+  it("onSignal 부착되면 호출 + 결과 채택", () =>
+    run(
+      Effect.gen(function* () {
+        const ctx = yield* makeCtx<string>();
+        let receivedSig: Signal | null = null;
+        const sig2 = Behaviors.stopped<string>();
+        const b = Behaviors.receive<string>(() =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, s) => {
+          receivedSig = s;
+          return Effect.succeed(sig2);
+        });
+        const next = yield* interpretSignalStep<string>(
+          b,
+          ctx,
+          Signal.PostStop,
+        );
+        expect(receivedSig).toEqual(Signal.PostStop);
+        expect(next).toBe(sig2);
+      }),
+    ));
+
+  it("onSignal 이 Same 반환하면 _현재 Receive_ 유지", () =>
+    run(
+      Effect.gen(function* () {
+        const ctx = yield* makeCtx<string>();
+        const b = Behaviors.receive<string>(() =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal(() => Effect.succeed(Behaviors.same()));
+        const next = yield* interpretSignalStep<string>(
+          b,
+          ctx,
+          Signal.PreRestart,
+        );
+        expect(next).toBe(b);
+      }),
+    ));
+});
+
+describe("runInterpreter — 신호 우선 폴링 (M2 사이클 2)", () => {
+  it("signalQueue 에만 신호 + mailbox 비어 있음 — 신호 처리되고 종료 가능", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        let sigSeen: Signal | null = null;
+        const b = Behaviors.receive<string>(() =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, s) => {
+          sigSeen = s;
+          return Effect.succeed(Behaviors.stopped());
+        });
+
+        yield* Queue.offer(entry.cell.signalQueue, Signal.PostStop);
+
+        yield* runInterpreter(b, entry, ctx);
+        expect(sigSeen).toEqual(Signal.PostStop);
+      }),
+    ));
+
+  it("signal + message 둘 다 큐에 있으면 _signal 먼저_", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        const order: string[] = [];
+
+        const b = Behaviors.receive<string>((_c, m) => {
+          order.push(`msg:${m}`);
+          if (m === "stop") return Effect.succeed(Behaviors.stopped());
+          return Effect.succeed(Behaviors.same());
+        }).receiveSignal((_c, s) => {
+          // PostStop 은 자동 emit 으로 끝에 한 번 더 옴 — 이 테스트는 PreRestart 만 추적.
+          if (s._tag === "PreRestart") order.push(`sig:${s._tag}`);
+          return Effect.succeed(Behaviors.same());
+        });
+
+        // 메시지를 _먼저_ 박아도 signal 이 _먼저_ 처리되어야 함.
+        yield* Queue.offer(entry.cell.mailbox, "a");
+        yield* Queue.offer(entry.cell.mailbox, "stop");
+        yield* Queue.offer(entry.cell.signalQueue, Signal.PreRestart);
+
+        yield* runInterpreter(b, entry, ctx);
+
+        // signal 먼저, 그 다음 mailbox 순서대로
+        expect(order).toEqual(["sig:PreRestart", "msg:a", "msg:stop"]);
+      }),
+    ));
+
+  it("onSignal 없는 Behavior 가 signal 받으면 무시, mailbox 처리 계속", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        const seen: string[] = [];
+
+        const b = Behaviors.receive<string>((_c, m) => {
+          seen.push(m);
+          if (m === "stop") return Effect.succeed(Behaviors.stopped());
+          return Effect.succeed(Behaviors.same());
+        });
+        // onSignal 미부착 — signal 무시.
+
+        // PostStop 대신 PreRestart — PostStop 은 사이클 3 부터 자발 종료 트리거.
+        yield* Queue.offer(entry.cell.signalQueue, Signal.PreRestart);
+        yield* Queue.offer(entry.cell.mailbox, "x");
+        yield* Queue.offer(entry.cell.mailbox, "stop");
+
+        yield* runInterpreter(b, entry, ctx);
+        expect(seen).toEqual(["x", "stop"]);
+      }),
+    ));
+
+  it("onSignal 결과가 새 Receive 면 _새_ Behavior 가 다음 메시지 처리", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        const seen: string[] = [];
+
+        const stage2 = Behaviors.receive<string>((_c, m) => {
+          seen.push(`s2:${m}`);
+          return Effect.succeed(Behaviors.stopped());
+        });
+
+        const stage1 = Behaviors.receive<string>((_c, m) => {
+          seen.push(`s1:${m}`);
+          return Effect.succeed(Behaviors.same());
+        }).receiveSignal(() => Effect.succeed(stage2));
+
+        yield* Queue.offer(entry.cell.signalQueue, Signal.PreRestart);
+        yield* Queue.offer(entry.cell.mailbox, "after-sig");
+
+        yield* runInterpreter(stage1, entry, ctx);
+        expect(seen).toEqual(["s2:after-sig"]);
+      }),
+    ));
+});
+
+describe("runInterpreter — PostStop 자동 emit (M2 사이클 3, ADR-021 §3.8)", () => {
+  it("Behavior 가 자발 Stopped 반환 시 _마지막 active Receive_ 의 onSignal 이 PostStop 받음", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        let postStopSeen = false;
+
+        const b = Behaviors.receiveMessage<string>((m) =>
+          m === "stop"
+            ? Effect.succeed(Behaviors.stopped())
+            : Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, s) => {
+          if (s._tag === "PostStop") postStopSeen = true;
+          return Effect.succeed(Behaviors.same());
+        });
+
+        yield* Queue.offer(entry.cell.mailbox, "stop");
+        yield* runInterpreter(b, entry, ctx);
+
+        expect(postStopSeen).toBe(true);
+      }),
+    ));
+
+  it("외부에서 signalQueue 에 PostStop offer 시 onSignal 호출 _후 fiber 자발 종료_", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        let postStopSeen = false;
+
+        const b = Behaviors.receive<string>(() =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, s) => {
+          if (s._tag === "PostStop") postStopSeen = true;
+          return Effect.succeed(Behaviors.same());
+        });
+
+        yield* Queue.offer(entry.cell.signalQueue, Signal.PostStop);
+        yield* runInterpreter(b, entry, ctx);
+
+        expect(postStopSeen).toBe(true);
+      }),
+    ));
+
+  it("onSignal 미부착 Behavior 가 자발 Stopped — PostStop noop, fiber 정상 종료", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        const b = Behaviors.receiveMessage<string>(() =>
+          Effect.succeed(Behaviors.stopped()),
+        );
+        yield* Queue.offer(entry.cell.mailbox, "trigger");
+        yield* runInterpreter(b, entry, ctx);
+        expect(true).toBe(true);
+      }),
+    ));
+
+  it("자발 Stopped — 직전 active Receive (stage 변환 후) 의 onSignal 이 PostStop 받음", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        let s1Saw = false;
+        let s2Saw = false;
+
+        const stage2 = Behaviors.receiveMessage<string>(() =>
+          Effect.succeed(Behaviors.stopped()),
+        ).receiveSignal((_c, s) => {
+          if (s._tag === "PostStop") s2Saw = true;
+          return Effect.succeed(Behaviors.same());
+        });
+
+        const stage1 = Behaviors.receiveMessage<string>(() =>
+          Effect.succeed(stage2),
+        ).receiveSignal((_c, s) => {
+          if (s._tag === "PostStop") s1Saw = true;
+          return Effect.succeed(Behaviors.same());
+        });
+
+        yield* Queue.offer(entry.cell.mailbox, "to-stage2");
+        yield* Queue.offer(entry.cell.mailbox, "stop");
+        yield* runInterpreter(stage1, entry, ctx);
+
+        expect(s1Saw).toBe(false);
+        expect(s2Saw).toBe(true);
+      }),
+    ));
+
+  it("PostStop 자동 emit 은 _한 번만_ 호출 — 자발 Stopped + 외부 PostStop 둘 다 와도 중복 X", () =>
+    run(
+      Effect.gen(function* () {
+        const { entry, ctx } = yield* makeEntryAndCtx<string>();
+        let postStopCount = 0;
+
+        const b = Behaviors.receiveMessage<string>(() =>
+          Effect.succeed(Behaviors.stopped()),
+        ).receiveSignal((_c, s) => {
+          if (s._tag === "PostStop") postStopCount += 1;
+          return Effect.succeed(Behaviors.same());
+        });
+
+        yield* Queue.offer(entry.cell.signalQueue, Signal.PostStop);
+        yield* Queue.offer(entry.cell.mailbox, "boom");
+        yield* runInterpreter(b, entry, ctx);
+
+        expect(postStopCount).toBe(1);
       }),
     ));
 });

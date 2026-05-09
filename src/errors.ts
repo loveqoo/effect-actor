@@ -24,3 +24,17 @@ export class MailboxFull extends Data.TaggedError("MailboxFull")<{
   readonly path: ActorPath;
   readonly capacity: number;
 }> {}
+
+// ask 패턴 — target 이 timeout 안에 응답 안 함 (ADR-029).
+export class AskTimeout extends Data.TaggedError("AskTimeout")<{
+  readonly path: ActorPath;
+  readonly timeoutMillis: number;
+}> {}
+
+// DeathPact — watch 한 target 의 Terminated 신호를 _처리 안 함_ (onSignal 미부착 또는 Unhandled 반환).
+// Akka Typed 의 unhandled signal 정책: 자살 → 부모가 ChildFailed 로 받음 (ADR-022).
+export class DeathPactException extends Data.TaggedError("DeathPactException")<{
+  readonly self: ActorPath;
+  readonly terminated: ActorPath;
+  readonly terminatedUid: string;
+}> {}

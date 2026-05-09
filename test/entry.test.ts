@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { Effect, Exit, HashSet, Option, STM, Scope, TMap, TRef } from "effect";
+import {
+  Chunk,
+  Effect,
+  Exit,
+  HashMap,
+  Option,
+  STM,
+  Scope,
+  TRef,
+} from "effect";
 import { ActorEntry } from "../src/entry.js";
 import { ActorPath } from "../src/path.js";
 import { WatchKey, WatchMessage } from "../src/signal.js";
@@ -23,10 +32,10 @@ describe("ActorEntry", () => {
         expect(status).toBe("running");
 
         const children = yield* STM.commit(TRef.get(entry.children));
-        expect(HashSet.size(children)).toBe(0);
+        expect(Chunk.size(children)).toBe(0);
 
-        const wSize = yield* STM.commit(TMap.size(entry.watchers));
-        expect(wSize).toBe(0);
+        const watchers = yield* STM.commit(TRef.get(entry.watchers));
+        expect(HashMap.size(watchers)).toBe(0);
 
         const fiber = yield* STM.commit(TRef.get(entry.fiber));
         expect(Option.isNone(fiber)).toBe(true);
@@ -44,8 +53,8 @@ describe("ActorEntry", () => {
         yield* STM.commit(
           STM.gen(function* () {
             yield* TRef.set(entry.status, "restarting");
-            yield* TRef.update(entry.children, (s) =>
-              HashSet.add(s, childPath),
+            yield* TRef.update(entry.children, (c) =>
+              Chunk.append(c, childPath),
             );
           }),
         );
@@ -54,7 +63,7 @@ describe("ActorEntry", () => {
         expect(status).toBe("restarting");
 
         const children = yield* STM.commit(TRef.get(entry.children));
-        expect(HashSet.has(children, childPath)).toBe(true);
+        expect(Chunk.toReadonlyArray(children)).toContainEqual(childPath);
       }),
     ));
 
@@ -69,16 +78,20 @@ describe("ActorEntry", () => {
         const k2 = WatchKey.make(watcherPath, "uid-new");
 
         yield* STM.commit(
-          TMap.set(entry.watchers, k1, WatchMessage.Terminated),
+          TRef.update(entry.watchers, (m) =>
+            HashMap.set(m, k1, WatchMessage.Terminated),
+          ),
         );
         yield* STM.commit(
-          TMap.set(entry.watchers, k2, WatchMessage.Custom("custom-msg")),
+          TRef.update(entry.watchers, (m) =>
+            HashMap.set(m, k2, WatchMessage.Custom("custom-msg")),
+          ),
         );
 
-        const size = yield* STM.commit(TMap.size(entry.watchers));
-        expect(size).toBe(2);
+        const watchers = yield* STM.commit(TRef.get(entry.watchers));
+        expect(HashMap.size(watchers)).toBe(2);
 
-        const v1 = yield* STM.commit(TMap.get(entry.watchers, k1));
+        const v1 = HashMap.get(watchers, k1);
         expect(Option.isSome(v1)).toBe(true);
         if (Option.isSome(v1)) {
           expect(v1.value._tag).toBe("Terminated");

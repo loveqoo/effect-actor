@@ -135,7 +135,7 @@ import akka.actor.typed.scaladsl.AskPattern._
 val future: Future[Reply] = ref.ask[Reply](replyTo => Question("...", replyTo))
 ```
 
-ask는 응답용 임시 actor를 만들어서 그 ref를 메시지에 끼워주고, 응답이 오면 Future로 변환한다. 중요한 건 _요청자가 임시 actor의 ref를 메시지에 직접 박는다_ 는 점 — 이게 typed에서 응답 경로를 표현하는 표준 방식이다.
+ask는 응답용 임시 actor를 만들어서 그 ref를 메시지에 끼워주고, 응답이 오면 Future로 변환한다. 중요한 건 _요청자가 임시 actor의 ref를 메시지에 직접 넣는다_ 는 점 — 이게 typed에서 응답 경로를 표현하는 표준 방식이다.
 
 ---
 

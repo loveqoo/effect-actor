@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { Behaviors, unwrapMeta } from "../src/behavior.js";
 import type { ActorContext } from "../src/context.js";
 import { MailboxPolicy } from "../src/mailbox.js";
+import { Signal } from "../src/signal.js";
 
 describe("Behavior ADT 종결자", () => {
   it("same() 의 _tag 는 'Same'", () => {
@@ -123,5 +124,88 @@ describe("Behaviors.withMailbox + 메타 추출 (ADR-018, ADR-026)", () => {
     );
     const meta = unwrapMeta(wrapped);
     expect(meta.inner._tag).toBe("Setup");
+  });
+});
+
+describe("Behaviors.receive(...).receiveSignal(...) — 신호 핸들러 부착 (M2)", () => {
+  it("receive 만 하면 onSignal 은 null — _명시적으로_ 비어 있음", () => {
+    const b = Behaviors.receive<string>(() => Effect.succeed(Behaviors.same()));
+    expect(b._tag).toBe("Receive");
+    if (b._tag === "Receive") {
+      expect(b.onSignal).toBeNull();
+    }
+  });
+
+  it("receiveMessage 도 onSignal null — fluent 호출 전까지", () => {
+    const b = Behaviors.receiveMessage<string>(() =>
+      Effect.succeed(Behaviors.same()),
+    );
+    if (b._tag === "Receive") {
+      expect(b.onSignal).toBeNull();
+    }
+  });
+
+  it("receive(...).receiveSignal(...) 는 _새 Receive_ 반환 (불변), onSignal 채움", () => {
+    const msgHandler = () => Effect.succeed(Behaviors.same<string>());
+    const sigHandler = (_c: ActorContext<string>, _s: Signal) =>
+      Effect.succeed(Behaviors.same<string>());
+
+    const base = Behaviors.receive<string>(msgHandler);
+    const withSig = base.receiveSignal(sigHandler);
+
+    // 원본은 그대로 (_불변_)
+    if (base._tag === "Receive") {
+      expect(base.onSignal).toBeNull();
+    }
+    // 새 객체는 onSignal 채움 + handle 보존
+    expect(withSig._tag).toBe("Receive");
+    if (withSig._tag === "Receive") {
+      expect(withSig.handle).toBe(msgHandler);
+      expect(withSig.onSignal).toBe(sigHandler);
+    }
+  });
+
+  it("receiveMessage(...).receiveSignal(...) 도 같은 모양 — handle 은 (ctx, msg) wrapper", () => {
+    const sigHandler = () => Effect.succeed(Behaviors.same<string>());
+    const b = Behaviors.receiveMessage<string>(() =>
+      Effect.succeed(Behaviors.same()),
+    ).receiveSignal(sigHandler);
+
+    expect(b._tag).toBe("Receive");
+    if (b._tag === "Receive") {
+      expect(b.onSignal).toBe(sigHandler);
+    }
+  });
+
+  it("연쇄 receiveSignal — 마지막 호출이 채택 (_가장 바깥_ 이 이김, Akka 같음)", () => {
+    const sig1 = () => Effect.succeed(Behaviors.same<string>());
+    const sig2 = () => Effect.succeed(Behaviors.same<string>());
+
+    const b = Behaviors.receive<string>(() =>
+      Effect.succeed(Behaviors.same()),
+    )
+      .receiveSignal(sig1)
+      .receiveSignal(sig2);
+
+    if (b._tag === "Receive") {
+      expect(b.onSignal).toBe(sig2);
+    }
+  });
+
+  it("withMailbox 안에 receive(...).receiveSignal(...) — unwrapMeta 가 inner 의 onSignal 보존", () => {
+    const sigHandler = () => Effect.succeed(Behaviors.same<string>());
+    const inner = Behaviors.receive<string>(() =>
+      Effect.succeed(Behaviors.same()),
+    ).receiveSignal(sigHandler);
+    const wrapped = Behaviors.withMailbox(
+      inner,
+      MailboxPolicy.bounded(4, "drop"),
+    );
+
+    const meta = unwrapMeta(wrapped);
+    expect(meta.inner).toBe(inner);
+    if (meta.inner._tag === "Receive") {
+      expect(meta.inner.onSignal).toBe(sigHandler);
+    }
   });
 });

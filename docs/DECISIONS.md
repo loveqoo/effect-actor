@@ -46,7 +46,7 @@ Akka는 Classic과 Typed 두 갈래가 있다. Classic은 부모가 자식의 su
 - 일자: 2026-05-08
 
 ### 맥락
-poly-phony에서 ActorRef가 closure-bound value였고 mailbox가 인스턴스에 종속이었다. 그래서 restart가 의미 있게 동작 못함. 새 레포에서 이 모델을 _점진적_ 으로 도입할지, _1일차_ 부터 박을지가 갈림길이었다.
+poly-phony에서 ActorRef가 closure-bound value였고 mailbox가 인스턴스에 종속이었다. 그래서 restart가 의미 있게 동작 못함. 새 레포에서 이 모델을 _점진적_ 으로 도입할지, _1일차_ 부터 도입할지가 갈림길이었다.
 
 ### 결정
 **1일차부터 Stable ActorRef + Mailbox(인스턴스 분리) 모델로 시작.**
@@ -230,14 +230,14 @@ docs/API.md 의 예시는 _읽을_ 수는 있어도 _실행_ 안 됨. 코드와 
 - 출처: plan-devex-review F5 결정
 
 ### 맥락
-에러 메시지 어휘를 _지금_ 일괄 박을지, _사이클마다_ 결정할지.
+에러 메시지 어휘를 _지금_ 일괄 정할지, _사이클마다_ 결정할지.
 
 ### 결정
 **계층적 접근:** 최상위 에러 종류(ActorNotFound, IncarnationMismatch, MailboxFull, AskTimeout, DeathPactException, StashOverflow 등)는 ARCHITECTURE.md §4.5 에 _지금_ 나열. EffectTS Tagged Error 표현 도입은 M1 첫 사이클. 구체 메시지 텍스트/권장 fix/문서 링크는 _관련 패스의 사이클_ 에서 확정.
 
 ### 결과
 - (+) 일관성 — 모든 에러가 같은 패턴(Tagged Error).
-- (+) 점진성 — 모르는 에러를 추측해 박지 않음. 만들면서 확정.
+- (+) 점진성 — 모르는 에러를 추측해 정하지 않음. 만들면서 확정.
 - (-) 메타 관리 부담 약간 (어디서 어휘 결정했는지 LEARNINGS.md 추적).
 
 ---
@@ -270,7 +270,7 @@ docs/API.md 의 예시는 _읽을_ 수는 있어도 _실행_ 안 됨. 코드와 
 
 ## ADR-015: M1 범위 확장 (superseded by ADR-025)
 - 상태: superseded by ADR-025 (2026-05-09)
-- 출처: plan-eng-review D6 결정 (M1 + setup) → ADR-025 로 박힘.
+- 출처: plan-eng-review D6 결정 (M1 + setup) → ADR-025 로 정해짐.
 
 > _proposed → renumbered as ADR-025._
 
@@ -388,7 +388,7 @@ Akka 와 동일 — tell 은 _delivery 보장 안 함_. 사용자가 보장 원�
 ### 맥락
 Round 1: ARCHITECTURE.md §3.5 (Restart) 가 _현재 Behavior 가 PreRestart 처리_ 라 적힘. 그 Behavior 는 방금 실패해서 _깨진 fiber_ 안 — supervision 래퍼는 §1 에서 _해석기 밖_ 에 있는데 어떻게 그 Behavior 에 PreRestart 발사? 모순.
 
-Round 2 (Codex 재고): "supervision 은 해석기 밖" invariant 자체가 잘못 — 래퍼가 _현재 Behavior 인스턴스_ 추적해야 PreRestart 발사 가능. 즉 supervision 과 interpreter 가 _같은 fiber, 같은 광광_. 문서 표현 정정 필요.
+Round 2 (Codex 재고): "supervision 은 해석기 밖" invariant 자체가 잘못 — 래퍼가 _현재 Behavior 인스턴스_ 추적해야 PreRestart 발사 가능. 즉 supervision 과 interpreter 가 _같은 fiber, 같은 모양_. 문서 표현 정정 필요.
 
 ### 결정
 **Supervision 은 _interpreter 와 같은 fiber 안의 외피_** (catchAll wrapper). 래퍼가 _현재 Behavior 인스턴스_ 추적.
@@ -401,9 +401,9 @@ ARCHITECTURE.md §1 다이어그램 갱신: "L3 Supervision 외피 — interpret
 
 ### 결과
 - (+) OV-2 결정 보존. 모순 해결.
-- (+) Akka ActorCell 광광과 일관 — cell 이 supervisor + Behavior 둘 다 보유.
+- (+) Akka ActorCell 과 일관 — cell 이 supervisor + Behavior 둘 다 보유.
 - (+) PreRestart 가 사용자 코드 수준 hook (Akka Typed 와 일관).
-- (-) "단순 분리" 원리 약간 느슨. 문서 표현 정정 (광광 인정).
+- (-) "단순 분리" 원리 약간 느슨. 문서 표현 정정 (같은 모양 인정).
 
 ---
 
@@ -490,7 +490,7 @@ target 사망 시: target.watchers 의 각 (watcherKey, msg) 에 대해 entry.si
 ### 맥락
 Round 1: API.md 의 `ActorRef.narrow<U extends Msg>()` 가 TypeScript 단순 캐스팅 → 런타임 안전성 X. 라이브러리가 supervision/lifecycle 강제하면서 타입 안전성에선 무력 → selling point 어려움.
 
-Round 2 (Codex): 이름만 변경하는 건 미봉. 부분 프로토콜 노출의 _대체 수단_ (adapter actor) 을 API.md 예제로 같이 박지 않으면 사용자는 그냥 캐스팅.
+Round 2 (Codex): 이름만 변경하는 건 미봉. 부분 프로토콜 노출의 _대체 수단_ (adapter actor) 을 API.md 예제로 같이 적지 않으면 사용자는 그냥 캐스팅.
 
 ### 결정
 **메서드 명: `narrow` → `narrowUnsafe`** — 사용자 명시 인지.
@@ -595,7 +595,7 @@ API.md §2.5 에 `Behaviors.withMailbox` 추가.
 - 출처: M1 사이클 0 — AGENTS.md §5.3 의 _M1 시작 전 결정_ 마무리
 
 ### 맥락
-M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경을 박아야 한다. 후보:
+M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경을 정해야 한다. 후보:
 - 패키지 매니저: npm / pnpm / yarn / bun
 - 모듈: ESM / CJS / dual
 - 테스트: vitest / jest / node:test
@@ -611,7 +611,7 @@ M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경
 - **실행: tsx** (examples 직접 실행, ESM .ts 지원).
 - **빌드 도구: 미정** — 라이브러리 배포가 필요해질 때 (M∞) 결정. 후보 tsup.
 - **포매터: prettier** (디폴트 설정).
-- **린터: 미정** — 처음부터 박지 않음. typecheck + 명시적 코드 리뷰로 충분. eslint 가 필요하면 후속 ADR.
+- **린터: 미정** — 처음부터 정하지 않음. typecheck + 명시적 코드 리뷰로 충분. eslint 가 필요하면 후속 ADR.
 
 ### 결과
 - (+) EffectTS 생태계 표준 조합. 사용자가 이미 익숙한 도구.
@@ -619,6 +619,259 @@ M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경
 - (+) M∞ 배포 시 빌드 도구만 결정하면 됨 — pnpm publish 흐름 자체는 표준.
 - (-) bun (이미 설치됨) 의 단일 도구 (run + test + bundle) 이점 포기. EffectTS 1급 통합이 vitest 쪽이라 그쪽이 더 안전.
 - (-) lock 파일이 pnpm 전용. 사용자가 npm/yarn 으로 바꾸려면 변환 필요 — 다만 그럴 일 거의 없음.
+
+---
+
+## ADR-028: 라이브러리 설계 우선순위 잣대
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M2 끝 도그푸딩 #1 (poly-phony) 보류 입력 → 잣대 명시 필요
+
+### 맥락
+도그푸딩 #1 입력으로 _4 결정 묶음_ (ask 시그너처, typed reply err, watch+ask 통합, ctx.stop cascade) 이 들어옴. 도그푸딩 입력 _그대로 채택_ 하면 라이브러리 설계 흔들림 — _첫 사용자_ 한 명에 맞춘 표면이 _다른 사용자_ 에게 어색. ADR-024 의 도그푸딩 정신은 _토대 검증_ 이지 _요구 그대로 채택_ 이 아님. 잣대가 명시 안 되면 매 결정마다 _재발견_.
+
+### 결정
+**라이브러리 설계 우선순위 (충돌 시 위쪽 우선):**
+
+1. **Akka Typed 정통 모양** — 라이브러리 _표면_ 이 Akka Typed 와 구조적 일치. AGENTS.md §7 한 줄 ("ActorRef 는 논리 주소 …") 의 시금석.
+2. **EffectTS typed 정신** — Akka 모양과 _자연 호환_ 인 곳에서만 typed 채택. ADR-026 의 typed root (`ActorSystem<RootMsg>`) 가 본보기. Akka 와 충돌하면 _Akka 우선_.
+3. **도그푸딩 boilerplate 는 _사용자 측 wrapper_** — 라이브러리는 정통 유지, 도메인 편의는 사용자 측 5-10 줄 wrapper.
+
+**도그푸딩 입력 처리 규칙:**
+- 도그푸딩 입력은 _라이브러리 설계 잣대_ 로 재평가 후 결정. 입력 그대로 채택 X.
+- 잣대와 충돌 시 _도그푸딩 측이 wrapper / 우회_ — 라이브러리는 정통.
+- 잣대 자체가 모호하면 _철학 ADR_ 먼저 박고 그 다음 입력 평가.
+
+### 결과
+- (+) 모든 결정의 _재발견_ 비용 0 — 잣대 한 번 정해두면 다음 결정마다 _그 잣대 적용_.
+- (+) _첫 사용자 의존성_ 차단 — poly-phony 한 도메인이 라이브러리 표면 흔들 수 없음.
+- (+) Akka Typed 사용자가 _구조적 친숙_ — 학습 비용 최소.
+- (-) 도그푸딩 측 boilerplate 부담 약간 — wrapper 5-10 줄. 라이브러리 설계 일관성과 trade-off 에서 후자 우선.
+- (-) _Akka 정통이 EffectTS 정신과 충돌_ 하는 케이스 발견 시 _Akka 우선_ 이 EffectTS 사용자에게 어색할 수도 — 그때마다 케이스별 ADR 로 명시.
+
+---
+
+## ADR-029: ask 패턴 시그너처 — Akka 정통 (untyped err)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M2 끝 도그푸딩 #1 입력 #1 + #2 → ADR-028 잣대 적용
+
+### 맥락
+도그푸딩 #1 입력 #2: poly-phony 의 ask 가 `ask<In, Out, Err>` (typed err) — `BackendNotFound` 같은 도메인 에러를 typed 로 표현. effect-actor M3 ask 설계 시 typed err 포함 여부 결정 필요.
+
+ADR-028 잣대 적용:
+- Akka Typed 의 ask 는 _untyped_ — `AskTimeoutException` 만. reply 의 _도메인 에러_ 는 reply ADT 안에 표현 (예: `Result<Resp, Err>` 또는 `Success | Failure` ADT).
+- EffectTS typed 정신 (`Effect<A, E>`) 과 충돌 — Akka 우선이 ADR-028 의 1차 잣대.
+
+### 결정
+**ask 시그너처:**
+```typescript
+// ctx 안: 자식 spawn 흉내 — 임시 actor 가 ctx 의 instance Scope 안 (ADR-021).
+ctx.ask<Resp>(
+  target: ActorRef<TargetMsg>,
+  make: (replyTo: ActorRef<Resp>) => TargetMsg,
+  timeout: Duration,
+): Effect.Effect<Resp, AskTimeout>
+
+// ref 안: top-level 또는 외부 Effect 에서. ask temp actor 가 자기 instance Scope.
+ref.ask<Resp>(
+  make: (replyTo: ActorRef<Resp>) => Msg,
+  timeout: Duration,
+): Effect.Effect<Resp, AskTimeout>
+```
+
+- **Resp generic 1개** — Akka 정통.
+- **fail 채널: `AskTimeout` 만** — typed err X. 도메인 에러는 사용자 측 reply ADT.
+- **timeout 필수 positional** — Akka 정통. opts 객체 X (단순함 우선).
+
+**도메인 에러 패턴 (사용자 측 wrapper 예시):**
+```typescript
+type LookupResp = { _tag: "Found"; ref: BackendRef } | { _tag: "NotFound" };
+
+const lookupBackend = (id: string) =>
+  ctx.ask<LookupResp>(registry, (replyTo) => ({ _tag: "Lookup", id, replyTo }), "5 seconds")
+    .pipe(Effect.flatMap(r =>
+      r._tag === "Found" ? Effect.succeed(r.ref) : Effect.fail(new BackendNotFound({ id })),
+    ));
+```
+
+### 결과
+- (+) Akka Typed 사용자가 _구조적 친숙_ — `ref.ask(make, timeout)` 정통.
+- (+) 라이브러리 표면 _작음_ — generic 1개, fail 채널 1개.
+- (+) 사용자가 _자기 도메인 에러_ 자유 표현 — reply ADT 가 도메인 분기 자연 노출.
+- (-) poly-phony 같은 도메인이 _wrapper 5-10 줄_ 부담. ADR-028 3차 잣대 (사용자 측 wrapper) 정신.
+- (-) `ctx.ask` 와 `ref.ask` 두 표면 — Akka Typed 도 같음 (`AskPattern._` import 또는 ctx 안). 같은 의미, 위치 차이.
+
+---
+
+## ADR-030: watch + ask 분리 — Akka 정통
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M2 끝 도그푸딩 #1 입력 #3 → ADR-028 잣대 적용
+
+### 맥락
+도그푸딩 #1 입력 #3: poly-phony 의 ask 가 `raceFirst(reply, terminated → fail ActorClosed)` — target 이 응답 전에 죽으면 caller 자동 fail. effect-actor M3 ask 에 watch 통합 여부 결정 필요.
+
+ADR-028 잣대 적용:
+- Akka Typed 의 ask 는 watch _분리_ — ask = timeout 만, watch 는 별도 (`ctx.watch` 또는 `ctx.watchWith`). caller 가 _명시_ 로 watch + ask combine.
+
+### 결정
+**ask 와 watch 는 분리.** ask 의 fail 채널은 `AskTimeout` 만 (ADR-029). target 의 죽음 검출이 필요하면 사용자 측 _명시 combine_:
+
+```typescript
+// 사용자 측 wrapper 예시 — ActorClosed 자동 fail 패턴.
+const askOrFailIfClosed = <Resp>(
+  ctx: ActorContext<Msg>,
+  target: ActorRef<TargetMsg>,
+  make: (replyTo: ActorRef<Resp>) => TargetMsg,
+  timeout: Duration,
+) =>
+  Effect.race(
+    ctx.ask<Resp>(target, make, timeout),
+    ctx.watchTerminated(target).pipe(Effect.flatMap(() => Effect.fail(new ActorClosed({ path: target.path })))),
+  );
+```
+
+`ctx.watchTerminated(target): Effect<void>` 는 M3 watch 인프라가 제공 — _Effect 형태로_ termination await (이게 watch 의 _Effect 노출_).
+
+### 결과
+- (+) Akka Typed 정통 — ask 와 watch 가 _독립 직교 기능_, 사용자가 필요 시 combine.
+- (+) ask 표면 _단순_ — fail 채널 1개 (`AskTimeout`).
+- (+) `ctx.watchTerminated` 가 watch 의 _Effect 형태_ 노출 — race / scope-bound 합성 자유.
+- (-) poly-phony 의 _자동 watch_ 의미가 wrapper 로 이동 — 5줄. ADR-028 3차 잣대 정신.
+- (-) caller 가 _명시 combine 잊기_ 가능성 — Akka Typed 도 같은 부담 (사용자 책임).
+
+---
+
+## ADR-031: ctx.stop cascade — graceful (자식 cascade + PostStop 호출)
+- 상태: accepted (M3.1 사이클 1 보강: sibling LIFO + spawn happens-before + Effect TMap 우회)
+- 일자: 2026-05-09
+- 출처: M2 끝 도그푸딩 #1 입력 #4 + M2 LEARNINGS §11 의 _자식 PostStop 미호출_ 한계 + 도그푸딩 #2 사이클 5 의 spawn race 발견
+
+### 맥락
+M2 끝 LEARNINGS: 부모 `sys.shutdown` 시 부모 Scope.close 가 자식 fiber 강제 interrupt → 자식 PostStop 미호출. 도그푸딩 #1 입력 #4: `BackendRegistry` 가 `Backend` 들을 eagerly spawn + lifetime 묶음 — registry close 시 모든 backend cleanup 필요.
+
+ADR-028 잣대 적용:
+- Akka Typed 의 stop 의미 = _자식 cascade_ + _PostStop 호출_ + _자기 stop_. 강제 interrupt 는 supervision restart 한정. 도그푸딩 요구가 Akka 정통과 _일치_ — 수용.
+
+### 결정
+**`ctx.stop(child)` 와 `sys.shutdown` 의 graceful 의미:**
+
+```
+1. status = "stopped" (STM)
+2. 자식 actor 들 재귀 stop (cascade) — 자식의 자식부터 (depth-first 또는 순서 무관)
+3. 자식 fiber.await — 자식의 PostStop hook 평가 + Scope close 끝까지 대기
+4. 자기 PostStop signalQueue offer
+5. 자기 fiber.await — 자기 PostStop hook 평가 + 자발 종료
+6. 자기 instance Scope close (자동 cleanup)
+7. registry.unregister
+```
+
+자식의 PostStop 이 호출되도록 _부모가 자식의 PostStop 처리 끝까지 await_. 이게 Akka 의 _graceful stop_ 의미.
+
+**강제 interrupt 의 자리:** supervision strategy 가 _restart_ 일 때만 (M4). stop 흐름에선 항상 graceful.
+
+### 결과
+- (+) M2 LEARNINGS §11 자식 PostStop 미호출 한계 정확히 해결.
+- (+) Akka Typed 사용자가 _구조적 친숙_.
+- (+) `ctx.stop(child)` 가 명시 표면 — 부모가 자식 lifetime 통제.
+- (-) shutdown 시간 = _가장 깊은 자식의 PostStop hook 시간 합_. 사용자가 PostStop 에서 hang 시키면 shutdown 도 hang. _timeout 강제_ 는 미정 (M4 또는 M5).
+- (-) 구현 복잡도 — children TRef 순회 + Fiber.awaitAll. M2 의 단일 actor shutdown 보다 한 단계 복잡.
+
+### M3.1 사이클 1 보강 — 도그푸딩 #2 사이클 5 의 race 대응
+
+**1. spawn happens-before contract**
+- spawnInternal 의 마지막 단계로 _자식 fiber 가 evaluateInitial (Setup 평가) 까지 끝낸 시점_ 을 await 함.
+- 구현: `Deferred<void, never>` latch — runInterpreter 가 evaluateInitial 직후 `Deferred.succeed`, spawnInternal 이 `Deferred.await` 후 ref 반환. Setup 평가 도중 fail 도 supervision 외피 catchAllCause 안에서 latch.succeed 보장 → 영원 await 불가.
+- 사용자 setup 안 ctx.spawn 들도 같은 보장 _재귀 전파_ — 부모 spawn 끝났다 = 모든 자식 setup 평가도 끝났다.
+
+**2. sibling LIFO cascade 명시 (Akka 정통)**
+- children 자료구조: `TRef<HashSet>` → `TRef<Chunk>` (insertion order 보존).
+- stopActor 의 cascade: `Chunk.reverse` + `Effect.forEach({concurrency: 1})` 로 마지막 spawn 자식부터 순차 stop.
+
+**3. Effect 3.21.2 TMap 버그 우회**
+- 발견: `TMap.remove`/`removeAll` 가 `Chunk.partition` 의 [excluded, satisfying] 시맨틱을 잘못 다뤄 _hash 충돌이 같은 bucket 의 다른 엔트리들을 한꺼번에 비움_. `actor://<sys>/...` prefix 공유 키들이 공통 bucket 으로 떨어져 첫 unregister 한 번에 registry 가 텅 비는 증상.
+- 우회: `Registry`, `entry.watchers`, `entry.watching` 모두 `TMap` → `TRef<HashMap>` 으로 교체 (atomic 갱신 그대로).
+- upstream 보고 candidate (TMap 본체 버그). 라이브러리 측은 일단 우회로 unblock.
+
+---
+
+## ADR-032: 패키징 — source-direct export (도그푸딩 단계 한정)
+- 상태: accepted (도그푸딩 #2 사이클 0 검증 완료)
+- 일자: 2026-05-09
+- 출처: M2 끝 도그푸딩 #1 입력 #5 → 도그푸딩 진입 자체를 막던 갭 해소
+- 검증: 2026-05-09 도그푸딩 #2 사이클 0 — poly-phony vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader / build step 없이 30줄 probe 통과 (LEARNINGS).
+
+### 맥락
+도그푸딩 #1 보류 사유 #5: `package.json` 의 `private: true` + `exports` 미설정 → poly-phony 가 file: dep 으로 path 해석 불가. 도그푸딩 진입 자체가 막힘.
+
+세 노선 (도그푸딩 #1 입력에서 정리):
+- (a) `private` 해제 + `exports: { ".": "./src/index.ts" }` — 소비측 tsx/ESM TS loader 가 source 직접 import
+- (b) tsc build script + `exports: { ".": { "import": "./dist/...", "types": "./dist/..." } }` — npm publish 동작과 동일
+- (c) npm publish (private registry 설정 필요)
+
+ADR-027 의 정신: _빌드 도구는 M∞ 직전_. 즉 dist 빌드는 _M∞ 결정_. 도그푸딩 단계는 빌드 안 함.
+
+### 결정
+**(a) source-direct export 채택. 도그푸딩 단계 한정.**
+
+`package.json` 갱신:
+- `"private": true` 제거
+- `"exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } }` — source 직접
+- `"files": ["src", "README.md", "LICENSE"]` — pnpm pack 시 포함
+- `"publishConfig": { "access": "restricted" }` — _실수로 publish_ 차단 (M∞ 까지 publish X)
+
+소비측 (poly-phony 등) 요구 사항:
+- ESM TS loader (tsx, ts-node ESM 모드, vite, 또는 framework 의 dev server)
+- 또는 자기 빌드 단계에서 `@loveqoo/effect-actor` source 를 같이 transform
+
+도그푸딩 시 import 패턴:
+```bash
+# poly-phony 측에서
+pnpm add file:../effect-actor
+# 또는 pnpm workspace link (monorepo 인 경우)
+```
+
+### 결과
+- (+) 도그푸딩 진입 _즉시 가능_ — 빌드 단계 0, source 변경 즉시 반영. 발견 사이클 단축.
+- (+) ADR-027 의 _빌드 도구 M∞ 직전_ 정신 안 어김.
+- (+) `publishConfig.access: restricted` 로 실수 publish 차단.
+- (-) 소비측이 ESM TS loader 강제 — 일반 사용자 (M∞ 후) 는 부담. 단 도그푸딩 단계라 OK.
+- (-) `exports.types` 가 `.ts` 직접 — TypeScript declaration 별도 생성 안 함. M∞ 빌드 시 dist + .d.ts + dual export 결정 (ADR-027 후속).
+
+### 후속 (M∞ 직전)
+- (b) 노선 결정 — tsup 또는 tsc emit 으로 `dist/` 생성, `exports` 를 `dist/index.js` + `dist/index.d.ts` 로 갱신.
+- 0.1.0 publish 직전 ADR-033+ 로 빌드 도구 확정.
+
+---
+
+## ADR-033: effect 의존성 — peerDependencies + devDependencies 분리
+- 상태: accepted (도그푸딩 #2 사이클 0 검증 완료)
+- 일자: 2026-05-09
+- 출처: 도그푸딩 #2 진입 직전 — 사용자가 effect 버전 차이 (effect-actor ^3.10.0 vs poly-phony ^3.21.2) 지적
+- 검증: 2026-05-09 도그푸딩 #2 사이클 0 — poly-phony 측 effect@3.21.2 가 root node_modules 에 hoist, effect-actor symlink 가 그것을 가리킴. 단일 인스턴스 보장 (LEARNINGS).
+
+### 맥락
+ADR-027 시점에 `effect` 를 `dependencies` 로 두고 ^3.10.0 으로 박았음. 이후 갱신 안 함. 도그푸딩 #2 진입 시 두 가지 문제:
+
+1. **모듈 인스턴스 분리 위험**: `effect` 는 라이브러리가 _자기 동작에 쓰는 런타임_ — Fiber / Scheduler / FiberRefs 가 _같은 module instance_ 여야 동작. `dependencies` 에 두면 사용자가 자기 effect 를 가질 때 _두 인스턴스_ 가 install 되어 actor 동작 실패 위험. pnpm 의 hoist 가 _같은 major_ 면 한 인스턴스 보장하지만 _확실 보장은 peerDep_.
+2. **하한 버전 stale**: ^3.10.0 은 _당시 최신_, 현재 ^3.21.2. 우리 코드가 3.21 의 API (예: `Effect.timeoutFail` 옵션 형태) 사용하면 3.10 에선 fail.
+
+### 결정
+**`effect` 를 `peerDependencies` 로 옮긴다.** 추가로:
+
+- **`peerDependencies.effect: ^3.10.0`** — 호환 범위 _넓게_ 유지 (사용자가 가진 effect 사용. major 같으면 호환 보장).
+- **`devDependencies.effect: ^3.21.0`** — 우리 개발 환경 검증 버전. test / typecheck 시 사용.
+- **버전 정책**: 우리가 _3.x 새 API_ 사용 시 peerDep 하한도 같이 올림. 도그푸딩에서 _하한 부족_ 발견되면 LEARNINGS + ADR.
+
+`@effect/vitest` 같은 _Effect 생태계 패키지_ 는 devDep 그대로 (테스트 도구).
+
+### 결과
+- (+) 사용자 인스턴스 일치 보장 — actor Fiber 가 사용자 effect 와 같은 module 인스턴스 사용.
+- (+) 사용자 effect 버전 자유 — 우리 호환 범위 (^3.10.0) 안에서 자기 결정.
+- (+) 우리 검증 환경은 _최신 버전_ — devDep 으로 분리.
+- (-) pnpm 의 strict-peer-dependencies 켜져 있으면 _peerDep 누락 시 install fail_. 사용자가 effect 안 갖고 있으면 명시적으로 install 해야. 라이브러리는 정통 방식이라 OK.
+- (-) peerDep 하한 (^3.10.0) 이 _우리 검증 안 한 버전_ 까지 포함. 발견되면 ADR-033 하한 올림.
 
 ---
 

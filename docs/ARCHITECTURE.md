@@ -29,7 +29,7 @@
 
 규칙: 위 계층은 _아래_ 만 호출한다. 옆이나 위로 호출하면 결합이 깨진다.
 
-> ⚠️ **L3 Supervision 외피 의미** (ADR-020): supervision 은 _완전히 분리된 계층_ 이 아니라 _interpreter 와 같은 fiber 안의 외피_. 래퍼가 _현재 Behavior 인스턴스_ 를 추적해야 PreRestart 를 _그 Behavior_ 에게 발사 가능. Akka 의 `ActorCell` 도 동일 광광 — supervisor 와 Behavior 둘 다 같은 cell 안에 보유.
+> ⚠️ **L3 Supervision 외피 의미** (ADR-020): supervision 은 _완전히 분리된 계층_ 이 아니라 _interpreter 와 같은 fiber 안의 외피_. 래퍼가 _현재 Behavior 인스턴스_ 를 추적해야 PreRestart 를 _그 Behavior_ 에게 발사 가능. Akka 의 `ActorCell` 도 같은 모양 — supervisor 와 Behavior 둘 다 같은 cell 안에 보유.
 
 ---
 
@@ -146,8 +146,11 @@ class Registry {
 
 ```typescript
 type Behavior<Msg> =
-  | { _tag: "Receive"; handle: (ctx: ActorContext<Msg>, msg: Msg) => Effect<Behavior<Msg>> }
-  | { _tag: "ReceiveSignal"; handleMsg: ...; handleSignal: ... }
+  | { _tag: "Receive";  // M2: onSignal 필드 + receiveSignal fluent 메서드 (ReceiveBehavior)
+      handle: (ctx: ActorContext<Msg>, msg: Msg) => Effect<Behavior<Msg>>;
+      onSignal: ((ctx: ActorContext<Msg>, signal: Signal) => Effect<Behavior<Msg>>) | null;
+      receiveSignal: (h: ...) => Behavior<Msg>;
+    }
   | { _tag: "Setup"; init: (ctx: ActorContext<Msg>) => Effect<Behavior<Msg>> }
   | { _tag: "Same" }
   | { _tag: "Stopped" }
@@ -164,6 +167,8 @@ type MailboxPolicy =
 해석기는 _현재 Behavior_ 를 들고, 메시지를 받아서 _다음 Behavior_ 를 계산. `Same` 이면 그대로, `Stopped` 면 종료.
 
 `Supervise` / `WithMailbox` 같은 _래퍼 ADT_ 는 spawn 의 0단계에서 _벗겨져_ 메타 추출 (§3.1). 같은 패턴.
+
+**M2: 신호 처리** — `Receive` 가 _Akka Typed 모양_ 의 fluent 빌더 (`Behaviors.receive(...).receiveSignal(...)`). `onSignal` 이 null 이면 신호 무시 (Akka unhandled). PostStop 은 _자발 Stopped 도달_ 또는 _외부 emit (shutdown)_ 두 케이스 모두 _마지막 active Receive_ 의 onSignal 이 한 번만 받음. ADR-021 §3.8 의 _명시 hook 먼저, 자동 Scope cleanup 나중_.
 
 ---
 
@@ -235,7 +240,7 @@ loop(behavior, ctx):
 
 - **Signal 우선순위:** `PostStop`, `Terminated` 같은 시그널은 사용자 메시지보다 _먼저_ 처리. 두 큐를 둘 다 들여다보되, signalQueue 쪽을 우선 폴링 (ADR-009).
 - **`take` 의 의미:** EffectTS 의 `Queue.take` 는 기본 blocking. Fiber 가 자연스럽게 대기.
-- **Supervision 외피 (ADR-020):** _interpreter 와 같은 fiber 안_ 의 catchAll 외피. 래퍼가 _현재 Behavior 인스턴스_ 추적해 PreRestart 발사 가능. Akka ActorCell 광광.
+- **Supervision 외피 (ADR-020):** _interpreter 와 같은 fiber 안_ 의 catchAll 외피. 래퍼가 _현재 Behavior 인스턴스_ 추적해 PreRestart 발사 가능. Akka ActorCell 과 같은 모양.
 
 ### 3.4 Watch + Terminated (ADR-022)
 
@@ -378,7 +383,7 @@ Akka 모양과 일치하는 chained 로 진행.
 
 ### 4.7 Outside Voice 발견 — 모두 결정 끝 (2026-05-09 plan-eng-review)
 
-**Round 1 (2026-05-08):** OV-1, 2, 3, 4, 5, 8, 9, 10 → ADR-016 ~ ADR-023 으로 박힘. ADR-014 → ADR-024, ADR-015 → ADR-025.
+**Round 1 (2026-05-08):** OV-1, 2, 3, 4, 5, 8, 9, 10 → ADR-016 ~ ADR-023 으로 정해짐. ADR-014 → ADR-024, ADR-015 → ADR-025.
 
 **Round 2 (2026-05-09):** OV2-1, 2, 3, 4, 5, 6, 7, 8, 9, 10 → 위 ADR 보강 + ADR-026 신규. 자세한 내용은 [DECISIONS.md](./DECISIONS.md).
 
@@ -395,7 +400,7 @@ Akka 모양과 일치하는 chained 로 진행.
 | Registry 는 시스템 단위 단일 진실원 (TMap, STM tx) | resolve 가 항상 권위 있음. spawn/stop/watch 정합성 (ADR-017) |
 | Signal 은 사용자 메시지보다 우선 처리 | PostStop / Terminated 가 늦게 도달하면 안 됨 (ADR-009) |
 | Stop 은 재귀적 (자식 먼저 정리) | 자식이 부모보다 오래 사는 상태 금지 |
-| Supervision 은 해석기 외피 (같은 fiber, catchAll, 현재 Behavior 추적) | PreRestart 를 _그 Behavior_ 에 발사. Akka ActorCell 광광 (ADR-020) |
+| Supervision 은 해석기 외피 (같은 fiber, catchAll, 현재 Behavior 추적) | PreRestart 를 _그 Behavior_ 에 발사. Akka ActorCell 과 같은 모양 (ADR-020) |
 | Instance Scope = 자동 cleanup 기본, PostStop = 명시 hook | restart/stop 시 fork/timer/scoped resource 자동 정리 (ADR-021) |
 | Watch key = (path, uid) 양방향 TMap | 동명 재spawn 시 옛 watcher 가 새 entry 에 잘못 연결되지 않음 (ADR-022) |
 | Tell 은 best-effort delivery | uid mismatch / in-flight stop 은 dead letter 또는 의미적 소실 명시 (ADR-019) |

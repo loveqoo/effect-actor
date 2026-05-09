@@ -1,4 +1,4 @@
-import { Data } from "effect";
+import { Data, type Deferred } from "effect";
 import type { ActorPath } from "./path.js";
 
 // 시스템 신호 — 사용자 메시지보다 우선 처리 (ADR-009)
@@ -43,12 +43,22 @@ export const WatchKey = {
   make: (path: ActorPath, uid: string): WatchKey => Data.struct({ path, uid }),
 };
 
-// watch / watchWith 의 변환 메시지 (ADR-022)
+// watch / watchWith / watchTerminated 의 변환 메시지 (ADR-022, ADR-030)
+// - Terminated: signalQueue 에 발사
+// - Custom: mailbox 에 사용자 메시지로 발사
+// - Deferred: Effect 형태 노출용 (ctx.watchTerminated). target stop 시 Deferred.succeed.
 export type WatchMessage =
   | { readonly _tag: "Terminated" }
-  | { readonly _tag: "Custom"; readonly msg: unknown };
+  | { readonly _tag: "Custom"; readonly msg: unknown }
+  | {
+      readonly _tag: "Deferred";
+      readonly deferred: Deferred.Deferred<void, never>;
+    };
 
 export const WatchMessage = {
   Terminated: { _tag: "Terminated" } as const satisfies WatchMessage,
   Custom: (msg: unknown): WatchMessage => ({ _tag: "Custom", msg }),
+  Deferred: (
+    deferred: Deferred.Deferred<void, never>,
+  ): WatchMessage => ({ _tag: "Deferred", deferred }),
 };
