@@ -5,10 +5,11 @@
 //   3. _backoff sleep 도중 mailbox 보존_ — sleep 중 도착한 메시지가 새 incarnation 에서 처리
 //   4. .withLimit chain — backoff + 한도 초과 시 stop 강등
 //   5. RestartLimitExceeded cause (stop 시 fiber 종료 cause)
+// 메시지는 `Data.TaggedEnum`.
 //
 // 실행: pnpm tsx examples/06-backoff.ts
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import {
   ActorSystem,
   Behaviors,
@@ -16,9 +17,11 @@ import {
   type Behavior,
 } from "../src/index.js";
 
-type Msg =
-  | { readonly _tag: "Boom" }
-  | { readonly _tag: "Probe"; readonly id: string };
+type Msg = Data.TaggedEnum<{
+  Boom: {};
+  Probe: { readonly id: string };
+}>;
+const Msg = Data.taggedEnum<Msg>();
 
 const start = Date.now();
 const ts = (): string =>
@@ -33,12 +36,16 @@ const flaky: Behavior<Msg> = Behaviors.setup<Msg>((_ctx) =>
     const inc = setupCount;
     console.log(`${ts()} [setup #${inc}] init`);
     return Behaviors.receive<Msg>((_c, msg) =>
-      Effect.sync(() => {
-        if (msg._tag === "Boom") {
-          throw new Error("boom");
-        }
-        console.log(`${ts()} [#${inc}] received Probe(${msg.id})`);
-        return Behaviors.same();
+      Msg.$match(msg, {
+        Boom: () =>
+          Effect.sync<Behavior<Msg>>(() => {
+            throw new Error("boom");
+          }),
+        Probe: ({ id }) =>
+          Effect.sync(() => {
+            console.log(`${ts()} [#${inc}] received Probe(${id})`);
+            return Behaviors.same<Msg>();
+          }),
       }),
     );
   }),
@@ -60,29 +67,29 @@ const program = Effect.gen(function* () {
 
   // 1) Boom → 200ms backoff. sleep 중 Probe 도착 → 새 incarnation 이 처리 (mailbox 보존).
   console.log(`${ts()} [main] tell Boom`);
-  yield* sys.root.tell({ _tag: "Boom" });
+  yield* sys.root.tell(Msg.Boom());
   console.log(`${ts()} [main] tell Probe(during-sleep-1) — backoff 도중`);
-  yield* sys.root.tell({ _tag: "Probe", id: "during-sleep-1" });
+  yield* sys.root.tell(Msg.Probe({ id: "during-sleep-1" }));
   yield* Effect.sleep("280 millis"); // 200ms backoff + 처리 여유
 
   // 2) Boom → 400ms backoff (2x).
   console.log(`${ts()} [main] tell Boom`);
-  yield* sys.root.tell({ _tag: "Boom" });
+  yield* sys.root.tell(Msg.Boom());
   yield* Effect.sleep("500 millis");
 
   // 3) Boom → 800ms backoff (4x, cap 안).
   console.log(`${ts()} [main] tell Boom`);
-  yield* sys.root.tell({ _tag: "Boom" });
+  yield* sys.root.tell(Msg.Boom());
   yield* Effect.sleep("900 millis");
 
   // 4) Boom → 한도 초과 (4번째 시도, maxNrOfRetries=3) → stop 강등.
   console.log(`${ts()} [main] tell Boom (한도 초과 예상)`);
-  yield* sys.root.tell({ _tag: "Boom" });
+  yield* sys.root.tell(Msg.Boom());
   yield* Effect.sleep("400 millis");
 
   // 5) 액터 죽음 — 이 메시지는 dead-letter (best-effort)
   console.log(`${ts()} [main] tell Probe(after-stop) — dead-letter 예상`);
-  yield* sys.root.tell({ _tag: "Probe", id: "after-stop" });
+  yield* sys.root.tell(Msg.Probe({ id: "after-stop" }));
   yield* Effect.sleep("100 millis");
 
   console.log(`${ts()} [main] total setup invocations: ${setupCount}`);

@@ -1,10 +1,11 @@
 // examples/01-counter — M1 DoD.
 // 보여주는 것: setup, ctx.spawn (자식), state machine (Behavior 매개변수),
 // 자식 actor 로 reply 보내기 (ask 가 없는 M1 단계의 fan-out 형태).
+// 메시지는 `Data.TaggedEnum` (Effect 정통, examples/09-tagged-enum 참고).
 //
 // 실행: pnpm tsx examples/01-counter.ts
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import {
   ActorSystem,
   Behaviors,
@@ -12,11 +13,14 @@ import {
   type Behavior,
 } from "../src/index.js";
 
-type CounterMsg =
-  | { readonly _tag: "Inc" }
-  | { readonly _tag: "Get" };
+type CounterMsg = Data.TaggedEnum<{
+  Inc: {};
+  Get: {};
+}>;
+const CounterMsg = Data.taggedEnum<CounterMsg>();
 
 // Reporter — Counter 가 보내준 현재 값을 stdout 으로 보고.
+// 값 메시지 (number) — taggedEnum 부적합 (단순 값이라 ADT 의미 없음).
 const reporter: Behavior<number> = Behaviors.receiveMessage<number>((n) =>
   Effect.sync(() => {
     console.log(`current count: ${n}`);
@@ -30,14 +34,13 @@ const counter = (
   n: number,
   reportTo: ActorRef<number>,
 ): Behavior<CounterMsg> =>
-  Behaviors.receiveMessage<CounterMsg>((msg) => {
-    switch (msg._tag) {
-      case "Inc":
-        return Effect.succeed(counter(n + 1, reportTo));
-      case "Get":
-        return reportTo.tell(n).pipe(Effect.as(Behaviors.same<CounterMsg>()));
-    }
-  });
+  Behaviors.receiveMessage<CounterMsg>((msg) =>
+    CounterMsg.$match(msg, {
+      Inc: () => Effect.succeed(counter(n + 1, reportTo)),
+      Get: () =>
+        reportTo.tell(n).pipe(Effect.as(Behaviors.same<CounterMsg>())),
+    }),
+  );
 
 // Root — setup 으로 reporter 자식 spawn 후 counter(0) 시작.
 const root: Behavior<CounterMsg> = Behaviors.setup<CounterMsg>((ctx) =>
@@ -50,10 +53,10 @@ const root: Behavior<CounterMsg> = Behaviors.setup<CounterMsg>((ctx) =>
 const program = Effect.gen(function* () {
   const sys = yield* ActorSystem.create(root, "counter-demo");
 
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Get" }); // reporter 가 "current count: 3" 출력
+  yield* sys.root.tell(CounterMsg.Inc());
+  yield* sys.root.tell(CounterMsg.Inc());
+  yield* sys.root.tell(CounterMsg.Inc());
+  yield* sys.root.tell(CounterMsg.Get()); // reporter 가 "current count: 3" 출력
 
   // fiber 가 메시지 처리할 짧은 시간
   yield* Effect.sleep("100 millis");

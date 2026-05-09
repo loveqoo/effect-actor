@@ -5,23 +5,29 @@
 //   3. timers.startSingleTimer + timers.cancel — 일회성 + 취소
 //   4. ctx.scheduleOnce — _다른_ 액터에 delayed tell
 //   5. ctx.fork — instance scope 안 fork (사용자 직접). stop 시 자동 cancel.
+// 메시지는 `Data.TaggedEnum`. 4종 + payload 가 있어서 $match 의 진가가 잘 보임.
 //
 // 실행: pnpm tsx examples/08-timer.ts
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import {
   ActorSystem,
   Behaviors,
   type Behavior,
 } from "../src/index.js";
 
-type Msg =
-  | { readonly _tag: "Heartbeat" }
-  | { readonly _tag: "OneShot" }
-  | { readonly _tag: "CancelHeartbeat" }
-  | { readonly _tag: "Done" };
+type Msg = Data.TaggedEnum<{
+  Heartbeat: {};
+  OneShot: {};
+  CancelHeartbeat: {};
+  Done: {};
+}>;
+const Msg = Data.taggedEnum<Msg>();
 
-type ChildMsg = { readonly _tag: "Wakeup"; readonly from: string };
+type ChildMsg = Data.TaggedEnum<{
+  Wakeup: { readonly from: string };
+}>;
+const ChildMsg = Data.taggedEnum<ChildMsg>();
 
 const start = Date.now();
 const ts = (): string =>
@@ -29,10 +35,14 @@ const ts = (): string =>
 
 // child — scheduleOnce 의 대상.
 const child: Behavior<ChildMsg> = Behaviors.receive<ChildMsg>((_c, msg) =>
-  Effect.sync(() => {
-    console.log(`${ts()} [child] received Wakeup(from=${msg.from})`);
-    return Behaviors.same();
-  }),
+  Effect.sync(() =>
+    ChildMsg.$match(msg, {
+      Wakeup: ({ from }) => {
+        console.log(`${ts()} [child] received Wakeup(from=${from})`);
+        return Behaviors.same<ChildMsg>();
+      },
+    }),
+  ),
 );
 
 // root — withTimers 안에서 heartbeat + oneShot 등록 + 자식에 scheduleOnce.
@@ -41,10 +51,11 @@ const root: Behavior<Msg> = Behaviors.setup<Msg>((ctx) =>
     const childRef = yield* ctx.spawn(child, "kid");
 
     // 100ms 후 다른 액터에 메시지 (scheduleOnce).
-    yield* ctx.scheduleOnce("100 millis", childRef, {
-      _tag: "Wakeup" as const,
-      from: "scheduleOnce",
-    });
+    yield* ctx.scheduleOnce(
+      "100 millis",
+      childRef,
+      ChildMsg.Wakeup({ from: "scheduleOnce" }),
+    );
 
     // 사용자 직접 fork (instance scope 안). stop 시 자동 cancel — 마지막 검증.
     let backgroundTicks = 0;
@@ -61,37 +72,43 @@ const root: Behavior<Msg> = Behaviors.setup<Msg>((ctx) =>
         // 100ms 간격 heartbeat
         yield* timers.startTimerWithFixedDelay(
           "hb",
-          { _tag: "Heartbeat" },
+          Msg.Heartbeat(),
           "100 millis",
         );
         // 250ms 후 일회성
         yield* timers.startSingleTimer(
           "once",
-          { _tag: "OneShot" },
+          Msg.OneShot(),
           "250 millis",
         );
 
         let beats = 0;
         return Behaviors.receive<Msg>((_c, msg) =>
-          Effect.gen(function* () {
-            switch (msg._tag) {
-              case "Heartbeat":
+          Msg.$match(msg, {
+            Heartbeat: () =>
+              Effect.sync(() => {
                 beats++;
                 console.log(`${ts()} [root] heartbeat #${beats}`);
                 return Behaviors.same<Msg>();
-              case "OneShot":
+              }),
+            OneShot: () =>
+              Effect.sync(() => {
                 console.log(`${ts()} [root] OneShot 도착`);
                 return Behaviors.same<Msg>();
-              case "CancelHeartbeat":
+              }),
+            CancelHeartbeat: () =>
+              Effect.gen(function* () {
                 console.log(`${ts()} [root] cancel heartbeat`);
                 yield* timers.cancel("hb");
                 return Behaviors.same<Msg>();
-              case "Done":
+              }),
+            Done: () =>
+              Effect.sync(() => {
                 console.log(
                   `${ts()} [root] Done — backgroundTicks=${backgroundTicks}, stop`,
                 );
                 return Behaviors.stopped<Msg>();
-            }
+              }),
           }),
         );
       }),
@@ -107,12 +124,12 @@ const program = Effect.gen(function* () {
   yield* Effect.sleep("350 millis");
 
   // heartbeat 취소
-  yield* sys.root.tell({ _tag: "CancelHeartbeat" });
+  yield* sys.root.tell(Msg.CancelHeartbeat());
   yield* Effect.sleep("250 millis");
   console.log(`${ts()} [main] (heartbeat 취소 후 — 추가 발사 X 확인)`);
 
   // 자발 stop — fork + 남은 timer 모두 자동 cancel
-  yield* sys.root.tell({ _tag: "Done" });
+  yield* sys.root.tell(Msg.Done());
   yield* Effect.sleep("100 millis");
 
   yield* sys.shutdown;

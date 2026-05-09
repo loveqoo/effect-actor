@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `examples/09-tagged-enum.ts` — `Data.TaggedEnum` (Effect) 로 메시지 ADT 정의 패턴. constructor + `$match` 자동, `{ _tag: "Foo" }` 리터럴 반복 줄임. effect-actor 자체는 메시지 모양에 의견 없음 — 사용자 도메인이라 리터럴 / const factory / `Data.TaggedEnum` 모두 OK.
 
 ### Changed
-- `examples/02-lifecycle.ts`, `examples/05-restart.ts` — 메시지 정의를 `Data.TaggedEnum` 으로 변형. `switch` 대신 `$match` 로 분기 — 새 case 추가 시 컴파일 강제 (exhaustiveness). 기능 변화 없음.
+- `examples/01-counter.ts`, `02-lifecycle.ts`, `03-watch.ts`, `04-ask.ts`, `05-restart.ts`, `06-backoff.ts`, `07-stash.ts`, `08-timer.ts` — 메시지 정의를 `Data.TaggedEnum` 으로 일괄 변형. `switch` 대신 `$match` 로 분기 — 새 case 추가 시 컴파일 강제 (exhaustiveness). `worker` (string), `reporter` (number) 같은 _값 메시지_ 는 그대로 (taggedEnum 부적합). 기능 변화 없음, 모든 example 출력 동일.
 
 ## [0.1.0] - 2026-05-10
 
