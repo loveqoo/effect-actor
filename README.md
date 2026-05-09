@@ -49,7 +49,7 @@ _실제 동작 코드는 M1 마일스톤 완료 시 [examples/01-restart-demo.ts
 | M3 | 🟢 완료 | ctx.stop graceful + watch / watchWith / watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1 | 🟢 완료 | spawn race fix — Deferred latch happens-before + Effect 3.21.2 TMap.remove 본체 버그 우회. 118 테스트, consumer 측 9ms / 5회 flake-free 검증 |
 | M4 | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 + 환류 fix (F1 / 의제 1+2). examples/05 동작. 161 테스트, consumer 측 25회 flake-free. |
-| M5 | ⚪ 대기 | Backoff / Stash / Timer |
+| M5 | 🟡 진행 중 | Backoff / Stash / Timer. _사이클 1 완료 — restart.withLimit + PreRestart 재실패 통합 (ADR-037)._ 169 테스트 |
 | M∞ | ⚪ 대기 | poly-phony 도그푸딩 → npm 배포 |
 
 자세한 진행 상황은 [docs/PLAN.md](./docs/PLAN.md).

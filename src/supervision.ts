@@ -1,21 +1,41 @@
-import { Cause, Chunk, Option } from "effect";
+import { Cause, Chunk, Option, type Duration } from "effect";
 
 // Supervision strategy ADT + 매처 + cause→error squash + rule 순회 (ADR-034, M4).
 // 사이클 1: ADT + 빌더. 사이클 2: pickStrategy 추가 (Resume 동작 분기 입력).
 // 사이클 3: Restart 분기에서 그대로 재사용.
 // 사이클 4: 매처 헬퍼 (matchTag, matchInstance 등) + 더 정교한 cause squash.
+// M5 사이클 1 (ADR-037): Restart 에 limit 추가 + Strategies.restart.withLimit 빌더.
+
+// withLimit 옵션 — Akka 의 (maxNrOfRetries, withinTimeRange) 같은 의미.
+// 슬라이딩 윈도우 안에서 maxNrOfRetries 초과 시 stop 강등.
+export interface RestartLimit {
+  readonly maxNrOfRetries: number;
+  // Duration.DurationInput 그대로 받음 — "1 second", Duration.seconds(1), "100 millis" 모두 OK.
+  readonly withinTimeRange: Duration.DurationInput;
+}
 
 // Strategy ADT — Akka Typed 의 SupervisorStrategy.{resume, restart, stop} 매핑.
-// (M5 에서 restartWithBackoff + withLimit 추가 예정.)
+// Restart 의 limit: null = 무한 (Akka 기본). RestartLimit = 슬라이딩 윈도우 한도.
 export type Strategy =
   | { readonly _tag: "Resume" }
-  | { readonly _tag: "Restart" }
+  | { readonly _tag: "Restart"; readonly limit: RestartLimit | null }
   | { readonly _tag: "Stop" };
 
 // 종결자 같은 패턴 — 참조 동일성 유지 (매번 새 객체 만들 필요 없음).
 const RESUME: Strategy = { _tag: "Resume" };
-const RESTART: Strategy = { _tag: "Restart" };
 const STOP: Strategy = { _tag: "Stop" };
+// Strategies.restart 는 _Strategy + withLimit 빌더_ 합성 객체. Akka 의 Restart.withLimit 모양.
+// withLimit 호출 시 _새_ Strategy 객체 (limit 채워진) 반환. 원본 (Strategies.restart) 은 limit=null 그대로.
+const RESTART_BASE: Strategy & {
+  readonly withLimit: (limit: RestartLimit) => Strategy;
+} = {
+  _tag: "Restart",
+  limit: null,
+  withLimit: (limit: RestartLimit): Strategy => ({
+    _tag: "Restart",
+    limit,
+  }),
+};
 
 // 매처 헬퍼 (ADR-036, M4 사이클 4) — Akka 의 `[E]` 타입 매칭 표면을 TS 로 옮긴 합성 함수.
 // matchInstance — class instanceof 매칭 (가장 일반적).
@@ -43,7 +63,7 @@ const matchAll: ErrorMatcher = (_e) => true;
 
 export const Strategies = {
   resume: RESUME,
-  restart: RESTART,
+  restart: RESTART_BASE,
   stop: STOP,
   matchInstance,
   matchTag,

@@ -1076,6 +1076,74 @@ Behaviors.supervise(b)
 
 ---
 
+## ADR-037: restart 한도 + PreRestart 재실패 통일 정책 (M5 사이클 1)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M5 사이클 1 — `Strategies.restart.withLimit` 도입 + 의제 3 (PreRestart 재실패) 묶음
+
+### 맥락
+M4 환류 사이클 2 에서 _stop/cleanup 경로 정합성_ 단일화 (`onSelfTermination` + PostStop hook 단일 source of truth). 그 직후 M5 진입 시점에 다음 두 사실을 인지:
+
+1. **`withLimit` 의 한도 초과** = restart loop 안에서 _stop 강등_ — 기존 supervisor stop 강등 경로 (`needStop` 분기) 와 _semantic 동일_.
+2. **의제 3 (PreRestart 재실패)** = restart 흐름 도중 _stop 강등_ — 위와 같은 분기.
+
+→ 두 fix 모두 `messageLoop` 의 restart 분기 한 군데를 보강하면 끝남. 한 사이클 묶어 일관 정책 박는 게 자연스러움. _라이브러리 설계 우선_ (ADR-028) 정신.
+
+### 결정
+
+**A. `Strategies.restart.withLimit({ maxNrOfRetries, withinTimeRange })` 빌더.**
+
+```ts
+// 무한 restart (Akka 기본)
+Strategies.restart  // limit: null
+
+// 한도 부착
+Strategies.restart.withLimit({
+  maxNrOfRetries: 5,
+  withinTimeRange: "1 minute",  // Duration.DurationInput 그대로
+})
+```
+
+`Strategies.restart` 는 _Strategy + withLimit 빌더_ 합성 객체. `withLimit` 호출은 _새_ Strategy 객체 (limit 채워진) 반환. 원본 `Strategies.restart` 는 `limit: null` 그대로 (immutability).
+
+**B. 한도 검사 = Akka 정통 — restart _시도 자체_ 가 카운트.**
+
+- `messageLoop` 안 mutable `restartHistory: number[]` (한 fiber lifetime).
+- restart 분기 진입 시: `now` 추가 + 윈도우 밖 timestamp 슬라이드 제거.
+- `restartHistory.length > maxNrOfRetries` → stop 강등.
+- 비교가 `>` 인 이유: `maxNrOfRetries=5` → 1, 2, 3, 4, 5 번째 시도는 모두 restart, 6 번째가 stop. Akka 와 동일.
+
+**C. PreRestart 재실패 → stop 강등 (의제 3).**
+
+- 기존: `yield* interpretSignalStep(lastActive, ctx, PreRestart)` → fail 시 외부 propagate (외피 catchAllCause 가 hook 호출, 그러나 `onSelfTermination` 우회).
+- 변경: `Effect.exit` 으로 캡처 → `Exit.isFailure` 면 `needStop = true; stopCause = preRestartExit.cause`.
+
+**D. stop 강등 cause 어휘.**
+
+- 한도 초과: `Cause.die(new RestartLimitExceeded({ path, maxNrOfRetries, windowMillis, attemptCount }))`.
+- PreRestart 재실패: `preRestartExit.cause` 그대로 (사용자 코드의 본 cause 보존).
+- supervisor 매처 stop / 미매치: `exit.cause` 그대로 (M4.1 기존 동작).
+
+세 케이스 모두 _기존 stop 강등 경로_ (PostStop hook + `onSelfTermination` + `Effect.failCause`) 재사용 → cleanup 단일 source of truth.
+
+**E. supervise 외피 _안쪽_ 이라 `RestartLimitExceeded` 는 사용자 onFailure 에 다시 안 잡힘.**
+
+`messageLoop` 의 restart 분기에서 발생 → 그대로 `Effect.failCause` 로 fiber 종료. 외피 catchAllCause 는 onFailure hook (parent ChildFailed 알림) 만 호출. 의도된 동작 — 한도 초과 cause 가 다시 restart 트리거하면 무한 루프.
+
+### 결과
+- (+) 사용자 표면 추가 1 줄 — `.withLimit({ maxNrOfRetries, withinTimeRange })`. Akka 모양 그대로.
+- (+) restart 한도 + PreRestart 재실패 + supervisor stop 강등 _세 케이스 모두 같은 cleanup 경로_ — 회귀 안전 (M4.1 패턴 그대로 확장).
+- (+) `restartHistory` 가 mutable JS array 단순 — TRef/STM 없음. 한 fiber 안 단일 owner 라 동시성 문제 없음.
+- (+) 윈도우 sliding 은 `now - timestamp > windowMs` 단순 비교 — Schedule API 의존 X (사이클 2 backoff 와 분리).
+- (-) `restartHistory` 가 entry 가 아닌 _supervise lifetime_ 에 묶임 — 문서화 필요 (사용자가 이해해야 reset semantics 명확).
+- (-) Akka 처럼 _backoff_ + `withLimit` 조합은 사이클 2 에서 추가 (이번 사이클은 한도만).
+
+### 후속 (M5 사이클 2+)
+- `Strategies.restartWithBackoff(opts).withLimit(...)` chain — 사이클 2 에서 backoff loop 의 sleep 단계와 한도 검사 통합.
+- _자발 Stopped 후 cellScope 누수_ + _자발 Stopped 시 자식 cascade_ — 같은 _stop/cleanup_ 패밀리지만 다른 분기 (자발 Stopped 흐름). M∞ 본격 도그푸딩에서 표면 빈도 보고 별도 ADR.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

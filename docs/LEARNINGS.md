@@ -532,3 +532,16 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [process] M4 의 _진짜 완료_ 도 M3 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 환류 fix 까지 통과한 시점_. ADR-024 정신 일관 (M2 끝 #1 → ADR-028~031, M3 끝 #2 → M3.1, M4 끝 #3 → M4.1).
 - [insight] **single root cause 가설 검증.** consumer (poly-phony) 측 ADR-037 가설 = "F3 단일 root cause". 라이브러리 측 진단 = "두 layer (의제 1 = 통로 호출 안 됨, 의제 2 = cleanup 자체 부재)". 결론: _semantic 일치_ 측면에서 가설 정확, _근본 메커니즘_ 측면에서는 두 layer. 작은 fix 두 개 (`onSelfTermination` 콜백 + cleanup 단일 source of truth) 로 4개 finding (F1 + F2 + 의제 1 + 의제 2) 모두 closed → consumer 가설의 _semantic 통일_ 직관이 사실상 맞았음. ADR-037 큰 통일은 미루고 작은 fix 로 충분 → _라이브러리 설계 우선_ (ADR-028) 정신 그대로.
 - [process] 다음 갈래 후보: (a) M5 진입 (Backoff / Stash / Timer), (b) Effect TMap 본체 PR (issue #6225 follow-up), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ 정신상 (a) 가 자연스러운 다음.
+
+
+
+### 2026-05-09 — M5 사이클 1 (restart.withLimit + 의제 3 통합, ADR-037)
+
+- [design] **`Strategies.restart` 의 자료구조 결정 — Strategy + withLimit 빌더 합성 객체.** Akka 의 `SupervisorStrategy.restart.withLimit(...)` 모양 그대로. 원본 `Strategies.restart` 는 `{ _tag: "Restart", limit: null, withLimit: (limit) => new Strategy }` — `_tag` 필드는 Strategy union narrow 에 그대로 쓰이고 `withLimit` 메서드는 외부에서만 의미. interpreter 의 `if (strategy._tag === "Restart") { ... strategy.limit ... }` 분기는 `withLimit` 무시 (구조적 호환). _참조 동일성 유지_ + _빌더 표면 친숙_ 둘 다 충족.
+- [design] **두 fix 한 사이클 묶음 — _restart 한도 초과_ + _PreRestart 재실패_.** 공통 분모: 둘 다 restart 분기 안 _stop 강등_ → 기존 supervisor stop 강등 경로 (`needStop` 분기, M4.1 사이클 2 의 `onSelfTermination` + PostStop hook 단일 source of truth) 그대로 재사용. 변경: `messageLoop` 의 restart 분기 한 군데에 _한도 검사_ + _PreRestart Effect.exit 캡처_ 추가. M4.1 의 cleanup 통일 패턴이 그대로 _확장_ 되어 회귀 안전. ADR-037.
+- [design] Akka 정통 — _restart 시도 자체가 카운트_ (성공/실패 무관). 슬라이딩 윈도우: `restartHistory.push(now)` + `now - restartHistory[0] > windowMs` while-shift. 비교는 `>` (즉 `maxNrOfRetries=2` → 1, 2 번째 시도는 restart, 3 번째가 stop). Akka 그대로.
+- [runtime] **`restartHistory` 는 `messageLoop` 안 mutable JS array (한 fiber lifetime).** TRef/STM 불필요 — 한 fiber 안 단일 owner. ADR-037 결과 (+) 항목으로 명시. Akka 의 `RestartImpl.restartCount` 와 같은 위치.
+- [runtime] **`Strategies.restart` 자체는 `Strategy` union 으로 좁혀지면 `withLimit` 가 보이지 않지만 _값_ 으로는 그대로 있음.** 즉 사용자가 `Strategies.restart.withLimit(...)` 호출 시 TS 타입은 `Strategy & { withLimit }` 그대로 — Strategies 객체에 _그 augmented 타입_ 으로 노출. 그러나 `onFailure(matcher, Strategies.restart)` 에 그대로 넘기면 strategy 파라미터의 `Strategy` 타입으로 narrow → augmented 부분 무시되고 `_tag === "Restart"` 분기로 들어감. _별 추가 work 없이 양쪽 동시 만족_.
+- [test] 8 테스트 추가 (총 169): 단위 4 (`Strategies.restart` 의 limit 기본값 / withLimit 새 객체 / 호출마다 다른 객체 / 참조 동일성 회귀) + 통합 4 (한도 초과 stop 강등 + watcher 알림 / sliding window 카운트 리셋 / 무한 restart 회귀 / PreRestart 재실패 stop 강등 + watcher 알림). 5회 flake-free. errors.test.ts 에 `RestartLimitExceeded` 단위 1개 추가.
+- [insight] **ADR-037 의 _통일 정책_ 이 자연스러운 이유** — M4.1 사이클 2 에서 `onSelfTermination` 콜백 도입한 시점에 _stop 강등 경로_ 가 단일화되어 있었음. 이번 사이클은 그 경로에 _두 새 진입점_ (한도 초과 / PreRestart 재실패) 만 추가. 즉 _아키텍처가 fix 를 자연스럽게 받아들임_ — M4.1 의 통일 작업이 M5 사이클 1 의 _비용을 미리 지불한 셈_. _라이브러리 설계 우선_ (ADR-028) 정신의 실효 사례.
+- [process] supervision.test.ts 에서 `RestartLimitExceeded` import 했다 제거 — 통합 테스트는 cause type 검증보다 _발사된 cleanup hooks_ (PostStop hook 호출 + watcher 알림) 검증이 우선. cause 자체 단위 검증은 errors.test.ts 에서.

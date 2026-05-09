@@ -21,6 +21,49 @@ describe("Strategy ADT (ADR-034)", () => {
     expect(Strategies.restart).toBe(Strategies.restart);
     expect(Strategies.stop).toBe(Strategies.stop);
   });
+
+  // M5 사이클 1 (ADR-037)
+  it("Strategies.restart 의 limit 기본값은 null (무한 restart)", () => {
+    expect(Strategies.restart._tag).toBe("Restart");
+    if (Strategies.restart._tag === "Restart") {
+      expect(Strategies.restart.limit).toBeNull();
+    }
+  });
+
+  it("Strategies.restart.withLimit({ ... }) 는 _새_ Strategy + limit 채워짐 (불변)", () => {
+    const limited = Strategies.restart.withLimit({
+      maxNrOfRetries: 3,
+      withinTimeRange: "1 second",
+    });
+    expect(limited._tag).toBe("Restart");
+    if (limited._tag === "Restart") {
+      expect(limited.limit).not.toBeNull();
+      expect(limited.limit?.maxNrOfRetries).toBe(3);
+      expect(limited.limit?.withinTimeRange).toBe("1 second");
+    }
+
+    // 원본 변경 X (immutability)
+    if (Strategies.restart._tag === "Restart") {
+      expect(Strategies.restart.limit).toBeNull();
+    }
+    expect(limited).not.toBe(Strategies.restart);
+  });
+
+  it("Strategies.restart.withLimit 는 _호출마다 새 객체_ (참조 동일성 X — 옵션값 다를 수 있음)", () => {
+    const a = Strategies.restart.withLimit({
+      maxNrOfRetries: 3,
+      withinTimeRange: "1 second",
+    });
+    const b = Strategies.restart.withLimit({
+      maxNrOfRetries: 3,
+      withinTimeRange: "1 second",
+    });
+    expect(a).not.toBe(b);
+    // 단 _구조_ 는 같음
+    if (a._tag === "Restart" && b._tag === "Restart") {
+      expect(a.limit?.maxNrOfRetries).toBe(b.limit?.maxNrOfRetries);
+    }
+  });
 });
 
 describe("Behaviors.supervise 빌더 (ADR-034)", () => {

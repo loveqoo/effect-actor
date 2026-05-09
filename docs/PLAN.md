@@ -17,7 +17,7 @@
 | M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
-| M5. 고급 기능 | ⚪ 대기 | Backoff / withLimit / Stash / Timer |
+| M5. 고급 기능 | 🟡 진행 중 | Backoff / withLimit / Stash / Timer. 사이클 1 완료 (`restart.withLimit` + 의제 3 PreRestart 재실패 통합, ADR-037). 169 테스트. |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
@@ -248,6 +248,9 @@
 - [ ] `examples/07-stash.ts` — withStash
 - [ ] `examples/08-timer.ts` — withTimers
 - [ ] **M5 끝 _본격_ 도그푸딩 (ADR-024)** — poly-phony 전면 도그푸딩 시작.
+
+**완료된 사이클:**
+- 🟢 사이클 1 — `Strategies.restart.withLimit({ maxNrOfRetries, withinTimeRange })` + 의제 3 (PreRestart 재실패 → stop 강등) 통합. ADR-037 박음. `RestartLimitExceeded` tagged error 추가. 누적 169 테스트, 5회 flake-free.
 
 ---
 

@@ -38,3 +38,15 @@ export class DeathPactException extends Data.TaggedError("DeathPactException")<{
   readonly terminated: ActorPath;
   readonly terminatedUid: string;
 }> {}
+
+// M5 사이클 1 (ADR-037) — restart 시도 한도 초과 시 stop 강등의 cause 표시.
+// Akka 의 _Failed too many times_ 와 같은 의미. supervise 외피 _안쪽_ 이라 사용자 onFailure 에 다시 안 잡힘.
+// onSelfTermination + PostStop hook + watcher 알림 정상 발사.
+export class RestartLimitExceeded extends Data.TaggedError(
+  "RestartLimitExceeded",
+)<{
+  readonly path: ActorPath;
+  readonly maxNrOfRetries: number;
+  readonly windowMillis: number;
+  readonly attemptCount: number;
+}> {}

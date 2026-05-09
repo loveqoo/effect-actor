@@ -3,6 +3,7 @@ import { Effect, Option, Queue, STM } from "effect";
 import { Behaviors, type Behavior } from "../src/behavior.js";
 import { ActorRef } from "../src/ref.js";
 import { Registry } from "../src/registry.js";
+import { Strategies } from "../src/supervision.js";
 import { ActorSystem } from "../src/system.js";
 import { ActorPath } from "../src/path.js";
 import type { ActorContext } from "../src/context.js";
@@ -1235,6 +1236,227 @@ describe("M4.1 사이클 2 — 자발 Stopped 시 watcher 알림 (도그푸딩 #
           Registry.resolve(sys.registry, childPath!.path),
         );
         expect(Option.isNone(childResolved)).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});
+
+describe("M5 사이클 1 — restart.withLimit + PreRestart 재실패 (ADR-037)", () => {
+  it("withLimit({ maxNrOfRetries: 2, withinTimeRange: '1 second' }) — 한도 초과 → stop 강등 + PostStop + watcher 알림", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+
+        type RootMsg = { readonly _tag: "Setup" };
+        let childRef: ActorRef<string> | null = null;
+
+        const child = Behaviors.receive<string>((_c, _m) =>
+          Effect.die(new Error("always-fail")),
+        ).receiveSignal((_c, sig) =>
+          Effect.sync(() => {
+            if (sig._tag === "PostStop") events.push("child:postStop");
+            if (sig._tag === "PreRestart") events.push("child:preRestart");
+            return Behaviors.same();
+          }),
+        );
+
+        const supervised = Behaviors.supervise(child).onFailure(
+          Strategies.matchAll,
+          Strategies.restart.withLimit({
+            maxNrOfRetries: 2,
+            withinTimeRange: "1 second",
+          }),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(supervised, "kid");
+            childRef = c;
+            return Behaviors.receive<RootMsg>((c2, _m) =>
+              Effect.gen(function* () {
+                yield* c2.watch(c);
+                // 3회 fail 트리거 — 한도 2 초과
+                yield* ctx.system.tell(c, "boom");
+                yield* ctx.system.tell(c, "boom");
+                yield* ctx.system.tell(c, "boom");
+                return Behaviors.same();
+              }),
+            ).receiveSignal((_c, sig) =>
+              Effect.sync(() => {
+                if (sig._tag === "Terminated")
+                  events.push("root:terminated");
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("200 millis");
+
+        // PreRestart 2회 (한도 안), 그리고 한도 초과 시 PostStop + watcher 알림
+        const preRestartCount = events.filter(
+          (e) => e === "child:preRestart",
+        ).length;
+        const postStopCount = events.filter(
+          (e) => e === "child:postStop",
+        ).length;
+        const terminatedCount = events.filter(
+          (e) => e === "root:terminated",
+        ).length;
+
+        expect(preRestartCount).toBe(2); // 1번째, 2번째 시도 → restart 성공 = PreRestart 발사
+        expect(postStopCount).toBe(1); // 3번째 시도 = 한도 초과 → stop 강등 → PostStop
+        expect(terminatedCount).toBe(1); // watcher 알림
+
+        // registry unregister 검증
+        const resolved = yield* STM.commit(
+          Registry.resolve(sys.registry, childRef!.path),
+        );
+        expect(Option.isNone(resolved)).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("withLimit — 윈도우 _밖_ 시도는 카운트 리셋 (sliding window)", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+        const setup = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.receiveMessage<string>((m) =>
+              m === "boom"
+                ? Effect.die(new Error("boom"))
+                : Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        // 윈도우 100ms 안 maxNrOfRetries=1 — 즉 _2번째 fail_ 가 100ms 안이면 stop, 밖이면 restart
+        const supervised = Behaviors.supervise(setup).onFailure(
+          Strategies.matchAll,
+          Strategies.restart.withLimit({
+            maxNrOfRetries: 1,
+            withinTimeRange: "100 millis",
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom"); // 1번째 → restart
+        yield* Effect.sleep("250 millis"); // 윈도우 밖
+        yield* sys.root.tell("boom"); // 윈도우 리셋, 다시 1번째 → restart
+        yield* Effect.sleep("250 millis"); // 윈도우 밖
+        yield* sys.root.tell("boom"); // 또 1번째 → restart
+        yield* Effect.sleep("80 millis");
+
+        // 윈도우 밖이라 카운트 리셋 → 모든 시도 restart 성공.
+        // 첫 spawn (1) + 3 restart = 4
+        expect(setupCount).toBeGreaterThanOrEqual(4);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("restart 무한 (limit=null) — 회귀: 10회 fail 도 모두 restart, 액터 살아있음", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+        const setup = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.receiveMessage<string>((m) =>
+              m === "boom"
+                ? Effect.die(new Error("boom"))
+                : Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        const supervised = Behaviors.supervise(setup).onFailure(
+          Strategies.matchAll,
+          Strategies.restart, // limit=null
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        for (let i = 0; i < 10; i++) {
+          yield* sys.root.tell("boom");
+        }
+        yield* Effect.sleep("200 millis");
+
+        // 첫 spawn (1) + 10 restart = 11
+        expect(setupCount).toBeGreaterThanOrEqual(11);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("PreRestart 재실패 (의제 3) → stop 강등 + PostStop + watcher 알림", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+        let preRestartCount = 0;
+
+        type RootMsg = { readonly _tag: "Setup" };
+        let childRef: ActorRef<string> | null = null;
+
+        const child = Behaviors.receive<string>((_c, _m) =>
+          Effect.die(new Error("trigger")),
+        ).receiveSignal((_c, sig) =>
+          Effect.gen(function* () {
+            if (sig._tag === "PreRestart") {
+              preRestartCount++;
+              return yield* Effect.die(new Error("pre-restart-fail"));
+            }
+            if (sig._tag === "PostStop") {
+              events.push("child:postStop");
+            }
+            return Behaviors.same();
+          }),
+        );
+
+        const supervised = Behaviors.supervise(child).onFailure(
+          Strategies.matchAll,
+          Strategies.restart, // 무한이지만 PreRestart 재실패가 우선
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(supervised, "kid");
+            childRef = c;
+            return Behaviors.receive<RootMsg>((c2, _m) =>
+              Effect.gen(function* () {
+                yield* c2.watch(c);
+                yield* ctx.system.tell(c, "boom");
+                return Behaviors.same();
+              }),
+            ).receiveSignal((_c, sig) =>
+              Effect.sync(() => {
+                if (sig._tag === "Terminated")
+                  events.push("root:terminated");
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("100 millis");
+
+        // PreRestart 1회 시도 → 그 안에서 재실패 → stop 강등 → PostStop
+        expect(preRestartCount).toBe(1);
+        expect(events.filter((e) => e === "child:postStop").length).toBe(1);
+        expect(events.filter((e) => e === "root:terminated").length).toBe(1);
+
+        // unregister
+        const resolved = yield* STM.commit(
+          Registry.resolve(sys.registry, childRef!.path),
+        );
+        expect(Option.isNone(resolved)).toBe(true);
 
         yield* sys.shutdown;
       }),

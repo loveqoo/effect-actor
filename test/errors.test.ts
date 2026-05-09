@@ -5,6 +5,7 @@ import {
   ActorNotFound,
   IncarnationMismatch,
   MailboxFull,
+  RestartLimitExceeded,
 } from "../src/errors.js";
 
 describe("Tagged errors", () => {
@@ -32,6 +33,21 @@ describe("Tagged errors", () => {
     const e = new MailboxFull({ path: p, capacity: 1024 });
     expect(e._tag).toBe("MailboxFull");
     expect(e.capacity).toBe(1024);
+  });
+
+  it("RestartLimitExceeded 는 path / 한도 / 윈도우 / 시도 횟수 보유 (M5 사이클 1, ADR-037)", () => {
+    const p = ActorPath.root("demo");
+    const e = new RestartLimitExceeded({
+      path: p,
+      maxNrOfRetries: 2,
+      windowMillis: 1000,
+      attemptCount: 3,
+    });
+    expect(e._tag).toBe("RestartLimitExceeded");
+    expect(e.path).toBe(p);
+    expect(e.maxNrOfRetries).toBe(2);
+    expect(e.windowMillis).toBe(1000);
+    expect(e.attemptCount).toBe(3);
   });
 
   it("Effect.fail 안에서 tagged 채널 실패로 흐름", async () => {

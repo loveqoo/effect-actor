@@ -1,11 +1,11 @@
-import { Cause, Deferred, Effect, Exit, Option, Queue } from "effect";
+import { Cause, Clock, Deferred, Duration, Effect, Exit, Option, Queue } from "effect";
 import type { Behavior, BehaviorEffect } from "./behavior.js";
 import type { ActorContext } from "./context.js";
 import type { ActorEntry } from "./entry.js";
-import { DeathPactException } from "./errors.js";
+import { DeathPactException, RestartLimitExceeded } from "./errors.js";
 import type { Signal } from "./signal.js";
 import { Signal as SignalNs } from "./signal.js";
-import type { SupervisorRule } from "./supervision.js";
+import type { RestartLimit, SupervisorRule } from "./supervision.js";
 import { pickStrategy } from "./supervision.js";
 
 // 한 메시지를 한 Behavior 에 적용해 _다음_ Behavior 계산.
@@ -116,6 +116,8 @@ const takeNext = <Msg>(entry: ActorEntry<Msg>): Effect.Effect<Inbox<Msg>> =>
 //   같은 fiber 안에서 재진입 — ref/uid/cell/cellScope 모두 보존, instanceScope 만 새로.
 // M4.1 사이클 2: 자발 Stopped / supervisor stop 강등 시 onSelfTermination 콜백 호출
 //   (watcher 알림 + registry unregister). PostStop hook 도 supervisor stop 강등에서 발사.
+// M5 사이클 1 (ADR-037): restart.withLimit 한도 초과 → stop 강등 (RestartLimitExceeded cause).
+//   PreRestart 재실패 (의제 3) → stop 강등 (PreRestart 의 cause). 둘 다 기존 stop 강등 경로 재사용.
 const messageLoop = <Msg>(
   initial: Behavior<Msg>,
   entry: ActorEntry<Msg>,
@@ -130,6 +132,10 @@ const messageLoop = <Msg>(
     let postStopHandled = false;
     // PostStop emit 시 사용 — outer 마지막 active 보존
     let lastActive: Behavior<Msg> = initial;
+
+    // M5 사이클 1: restart 시도 timestamp (한 fiber lifetime 내 sliding window).
+    // 가장 최근 fail 의 RestartLimit 를 기준으로 윈도우 적용.
+    const restartHistory: number[] = [];
 
     // outer: restart loop. continue = restart 재시작. break/return = 종료.
     // eslint-disable-next-line no-constant-condition
@@ -148,6 +154,8 @@ const messageLoop = <Msg>(
       let needRestart = false;
       let needStop = false;
       let stopCause: Cause.Cause<unknown> | null = null;
+      // M5 사이클 1: restart 분기 진입 시점의 limit (한도 검사 입력).
+      let pendingRestartLimit: RestartLimit | null = null;
 
       while (
         current._tag !== "Stopped" &&
@@ -183,6 +191,7 @@ const messageLoop = <Msg>(
         }
         if (strategy._tag === "Restart") {
           needRestart = true;
+          pendingRestartLimit = strategy.limit;
           break;
         }
         // Stop / 미매치
@@ -197,16 +206,58 @@ const messageLoop = <Msg>(
       }
 
       if (needRestart) {
-        // PreRestart 처리 — 현재 Behavior 의 onSignal. fail 시 외부 propagate (사이클 3 단순화).
-        yield* interpretSignalStep(lastActive, ctx, SignalNs.PreRestart);
-        // 자식 cascade stop + instanceScope 교체 (system.ts 가 콜백으로 제공).
-        if (onRestart) yield* onRestart();
-        // outer loop 재진입 — initial 재평가 + 새 incarnation.
-        continue;
+        // M5 사이클 1: 한도 검사 (Akka 정통 — restart 시도 _자체_ 가 카운트).
+        if (pendingRestartLimit !== null) {
+          const now = yield* Clock.currentTimeMillis;
+          const windowMs = Duration.toMillis(
+            Duration.decode(pendingRestartLimit.withinTimeRange),
+          );
+          // 윈도우 _밖_ timestamp 슬라이드 제거.
+          while (
+            restartHistory.length > 0 &&
+            now - restartHistory[0]! > windowMs
+          ) {
+            restartHistory.shift();
+          }
+          restartHistory.push(now);
+
+          if (restartHistory.length > pendingRestartLimit.maxNrOfRetries) {
+            // 한도 초과 → stop 강등. cause = RestartLimitExceeded (defect).
+            needRestart = false;
+            needStop = true;
+            stopCause = Cause.die(
+              new RestartLimitExceeded({
+                path: ctx.self.path,
+                maxNrOfRetries: pendingRestartLimit.maxNrOfRetries,
+                windowMillis: windowMs,
+                attemptCount: restartHistory.length,
+              }),
+            );
+          }
+        }
+
+        if (needRestart) {
+          // M5 사이클 1 (의제 3): PreRestart 재실패 → stop 강등.
+          // PreRestart 의 fail 을 캡처 — 외부 propagate 대신 cleanup 통일 경로로.
+          const preRestartExit = yield* Effect.exit(
+            interpretSignalStep(lastActive, ctx, SignalNs.PreRestart),
+          );
+          if (Exit.isFailure(preRestartExit)) {
+            needRestart = false;
+            needStop = true;
+            stopCause = preRestartExit.cause;
+          } else {
+            // 자식 cascade stop + instanceScope 교체 (system.ts 가 콜백으로 제공).
+            if (onRestart) yield* onRestart();
+            // outer loop 재진입 — initial 재평가 + 새 incarnation.
+            continue;
+          }
+        }
       }
 
       if (needStop) {
         // M4.1 사이클 2 (의제 1): supervisor stop 강등도 PostStop hook 발사 — 자발 Stopped 흐름과 정합.
+        // M5 사이클 1: restart 한도 초과 / PreRestart 재실패도 같은 경로 (ADR-037 통일).
         // PostStop hook 의 fail 은 무시 (cleanup 단계, 원본 cause propagate 가 우선).
         // onSelfTermination 도 호출 (watcher 알림 + registry unregister).
         yield* Effect.ignore(
