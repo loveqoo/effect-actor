@@ -19,8 +19,13 @@ const STOP: Strategy = { _tag: "Stop" };
 
 // 매처 헬퍼 (ADR-036, M4 사이클 4) — Akka 의 `[E]` 타입 매칭 표면을 TS 로 옮긴 합성 함수.
 // matchInstance — class instanceof 매칭 (가장 일반적).
+// 생성자 args 는 lenient 하게 — builtin Error (message?: string, options?), Tagged 등
+// 다양한 시그너처 모두 받기 위해 `any[]` 채택. `ReadonlyArray<unknown>` 은 builtin Error 의 옵셔널
+// 인자 시그너처와 호환 X (TS 의 contravariant arg 검사).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyCtor<T> = new (...args: any[]) => T;
 const matchInstance =
-  <T>(Ctor: new (...args: ReadonlyArray<unknown>) => T): ErrorMatcher =>
+  <T>(Ctor: AnyCtor<T>): ErrorMatcher =>
   (e: unknown): boolean =>
     e instanceof Ctor;
 
