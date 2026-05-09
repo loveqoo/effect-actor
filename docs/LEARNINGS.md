@@ -728,3 +728,25 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [verify] 5회 flake-free, 206 → 210 테스트.
 - [insight] **Deferred 미리 생성 패턴.** STM 안 Effect (Deferred.make) 못 부름 → 미리 만들고 등록 안 되면 GC. 작은 비용 (μs). _STM 트랜잭션 경계_ 와 _Effect 경계_ 가 다를 때의 정통 패턴.
 - [insight] **race-free 검증 = _직접 trigger 가능_ 한 회귀 테스트.** F2 두 테스트는 _stop 후 watch_ + _stop 와 watch 동시_ 두 패턴 모두 즉시 완료 보장 (timing-free). 이전엔 timing 으로 통과했지만 _이론상_ 위험. atomic tx 로 _이론상도_ 차단.
+
+
+
+### 2026-05-10 — M∞.1 사이클 3: codex re-review (사이클 2 fix 의 회귀 2 finding 발견)
+
+- [finding] **R1 (P1, semantics 회귀)**: `watchTerminated` / `watchOther` 가 `status === "stopped"` 면 즉시 alreadyGone. 그러나 `stopActor` 시작 시 즉시 status="stopped" set 이라 _Terminated 받자마자_ 같은 path 재spawn 시 `ChildNameTaken` (registry 에 옛 entry 남아있음). Akka 의 _Terminated = 완전히 끝_ semantics 회귀.
+- [finding] **R2 (P2, 누수)**: `spawnInternal` 이 mailbox + cellScope + instanceScope _먼저 할당_ 후 STM tx 의 `ChildNameTaken` fail → 자료 누수 누적.
+- [decision] **둘 다 fix → re-review → 배포** (사용자 선택). 사이클 4 진입. R1 은 P1 회귀라 반드시 fix.
+- [insight] **fix 가 새 finding 만든다.** 사이클 2 의 atomic STM tx 가 _race window_ 차단했지만 _stopped 의 의미_ 를 좁혔어야 함 (지금은 너무 일찍). 한 정확성 추가 = 다른 정확성 회귀 가능성. _re-review 의 가치_ 강화.
+- [insight] **codex 의 시야** — _semantics 회귀_ 같은 _철학 차원_ finding 은 자동 도구로 안 잡힘. 사용자 정신 (Akka Typed 정통) 을 _이해_ 한 외부 reviewer 만 짚을 수 있음. 배포 직전 외부 review 의 진가.
+
+
+
+### 2026-05-10 — M∞.1 사이클 4: R1+R2 fix — Terminated semantics + spawn fail cleanup (ADR-045)
+
+- [decision] **status 3단계 (`running`/`stopping`/`stopped`).** `stopActor` 시작 시 `"stopping"` (이전: 즉시 `"stopped"`). `onSelfTermination` 끝에 `"stopped"`. `stopping` 상태 watch 등록은 다음 atomic tx 가 잡음. `stopped` 만 alreadyGone 즉시 알림.
+- [decision] **`notifyWatchersOnSelfTermination` atomic STM tx — watchers 스냅샷 + status="stopped" + registry unregister + parent.children 갱신 한 트랜잭션.** 알림 발사 _전_ 에 unregister 끝나야 _Terminated 받은 즉시 재spawn_ 가능 (Akka semantics).
+- [decision] **`spawnInternal` `tapErrorCause` cleanup (R2).** mailbox + cellScope + instanceScope 를 STM tx _전_ 에 할당하므로 fail 시 자료 누수. `Effect.tapErrorCause` 가 fail/defect 시 `Scope.close(cellScope)` + `Queue.shutdown` 실행 후 fail 그대로 전파.
+- [verify] **회귀 5개**: R1×3 (PostStop 끝까지 await / 직후 재spawn 성공 / watch signal 도 stop 진행 중 발사), R2×2 (50회 fail 후 shutdown 정상 / fail 후 같은 이름 spawn 성공).
+- [verify] 5회 flake-free, 210 → 215 테스트.
+- [insight] **STM 트랜잭션 _크기_ 의 trade-off.** 사이클 2 는 spawn 의 STM tx 를 작게 (_check + register_ 만), 사이클 4 는 onSelfTermination 의 STM tx 를 크게 (_watchers + status + unregister + parent_ 한 번에). _atomic 보장_ 이 race-free 의 핵심. 너무 크면 contention 위험인데 single-actor write 라 OK.
+- [insight] **순서 (ordering) bug 의 패턴.** R1 의 본질은 _registry unregister 가 알림 발사 후_ 였던 것. atomic 으로 묶었지만 _순서_ 도 옳아야 함. STM 트랜잭션 안 ordering 은 deterministic 이지만 _STM commit 후 Effect.forEach 발사_ 사이의 ordering 도 신경 써야. 첫 시도 (status + watchers 만 atomic) 에서 fail 한 회귀 테스트가 _registry unregister 가 늦음_ 잡아냄 — TDD 의 가치.

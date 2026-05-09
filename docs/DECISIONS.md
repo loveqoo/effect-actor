@@ -1766,6 +1766,89 @@ readonly spawn: <ChildMsg>(
 
 ---
 
+## ADR-045: stopping/stopped 분리 + onSelfTermination atomic + spawn fail cleanup (M∞.1 사이클 4)
+- 상태: accepted
+- 일자: 2026-05-10
+
+### 맥락
+codex re-review (사이클 3) 가 사이클 2 fix 의 회귀 2개 발견:
+- **R1 (P1, semantics 회귀)**: `watchTerminated` / `watchOther` 가 `status === "stopped"` 면 즉시 alreadyGone 처리. 그러나 `stopActor` 시작 시 즉시 status="stopped" set → `Terminated` 받자마자 같은 path 재spawn 하면 `ChildNameTaken` (registry 에 옛 entry 아직 있음). Akka 의 _Terminated = 완전히 끝_ semantics 회귀.
+- **R2 (P2, 누수)**: `spawnInternal` 이 mailbox + cellScope + instanceScope _먼저 할당_ 후 STM tx 안에서 `ChildNameTaken` fail → 자료 누수. 중복 spawn 누적 시 큰 문제.
+
+후보:
+- (a) `status` 를 그대로 두고 `watchTerminated` 가 _registry resolve None_ 까지 polling — busy-wait 비효율.
+- (b) **`status` 를 3단계로 (`stopping` / `stopped`) + onSelfTermination 의 모든 정리 작업을 atomic STM tx**. `stopping` 면 watchers 등록 (다음 onSelfTermination tx 가 잡음), `stopped` 면 alreadyGone.
+- (c) 별도 lock — STM 이 이미 있는데 lock 추가 = 중복.
+
+### 결정
+**(b) status 3단계 + onSelfTermination atomic + spawn fail cleanup.**
+
+**1. status 3단계 (`status.ts`):**
+- `running` — 정상. tell + watch 받음.
+- `stopping` — `stopActor` 진입, cleanup 진행 중. tell 거부. watch 등록 _가능_ (다음 atomic tx 가 잡음).
+- `stopped` — `onSelfTermination` 끝, registry unregister 후. watch 즉시 alreadyGone.
+- `restarting` — (예약, 미사용 그대로).
+
+**2. `stopActor` 시작 시 `"stopping"` set** (이전: 즉시 `"stopped"`).
+
+**3. `notifyWatchersOnSelfTermination` atomic STM tx:**
+```typescript
+const watcherMap = yield* STM.commit(
+  STM.gen(function* () {
+    const m = yield* TRef.get(entry.watchers);
+    yield* TRef.set(entry.status, "stopped");
+    yield* Registry.unregister(registry, entry.path);
+    if (Option.isSome(parentPath)) {
+      const parentFound = yield* Registry.resolve(registry, parentPath.value);
+      if (Option.isSome(parentFound)) {
+        yield* TRef.update(parentFound.value.children, filter(notSelf));
+      }
+    }
+    return m;
+  }),
+);
+// 알림 발사 — 이 시점에 registry 에 옛 entry 없음 → 받는 즉시 재spawn 가능.
+yield* Effect.forEach(watcherPairs, ...);
+```
+
+_핵심 순서_: status 전환 + registry unregister + parent.children 갱신을 알림 _전_ 에 한 STM tx 로. Terminated 받은 watcher 가 즉시 같은 path 재spawn 시도해도 옛 entry 없음.
+
+**4. `watchOther` / `watchTerminatedOther`** — STM tx 안 status 검사:
+- `"stopped"` → alreadyGone 즉시 알림.
+- `"running"` 또는 `"stopping"` → watchers 등록. STM 트랜잭션이 직렬화하므로 _stopping 의 다음 atomic tx_ 가 우리 등록 잡음.
+
+**5. `spawnInternal` 의 fail cleanup (R2):**
+```typescript
+const entry = yield* STM.commit(STM.gen(...)).pipe(
+  Effect.tapErrorCause(() =>
+    Effect.gen(function* () {
+      yield* Scope.close(cellScope, Exit.void);
+      yield* Queue.shutdown(cell.mailbox);
+      yield* Queue.shutdown(cell.signalQueue);
+    }),
+  ),
+);
+```
+
+`Effect.tapErrorCause` — fail 또는 defect 시 cleanup 후 fail 그대로 전파. `Scope.close(cellScope)` 가 instanceScope cascade close. queue shutdown 명시.
+
+### 결과
+- (+) **Terminated semantics 보존** — Akka Typed 정통 (`Terminated` 받음 = `actor 완전히 사라짐` 보장). `watchTerminated.await` 직후 같은 path 재spawn 가능.
+- (+) **race-free 유지** — `stopping` 상태에서 watch 등록도 onSelfTermination atomic tx 가 잡아 영원 hang X (사이클 2 의 race-free 정신 유지).
+- (+) **자료 누수 차단** — ChildNameTaken fail path 가 mailbox + scope cleanup. 중복 spawn 누적 누수 0.
+- (+) STM 트랜잭션이 _작은 단위_ 라 contention 미미 (여전히 single-actor write).
+- (-) 알림 발사 _후_ 에는 registry 가 비워져 있어 _watcher 가 다시 watch 시도_ 하면 alreadyGone 즉시 — 정상 흐름이라 손실 없음.
+- (-) status 4번째 값 (`stopping`) — type narrow 위치 1곳 (tellViaSystem 의 `=== "running"` 검사) 그대로 OK. notifyWatchers 의 watcher status 검사도 `=== "stopped"` 만 skip (`stopping` watcher 는 알림 받음 — 죽어가는 중에도 fiber 살아있을 수 있음).
+
+### 후속
+- 회귀 테스트 5개:
+  - R1×3 — watchTerminated 가 PostStop 끝까지 await / watchTerminated 직후 재spawn 성공 / watch (Terminated signal) 도 stop 진행 중 등록되면 발사.
+  - R2×2 — ChildNameTaken 50회 fail 후 shutdown 정상 / fail path 후 같은 이름 spawn 성공.
+- 5회 flake-free, 210 → 215 테스트.
+- 사이클 5 에서 codex re-re-review 로 R1+R2 closed 검증 → 0.1.0 배포.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

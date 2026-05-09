@@ -2586,6 +2586,241 @@ describe("M∞.1 사이클 2 — spawn/watch race-free (F1 + F2, ADR-044)", () =
     ));
 });
 
+describe("M∞.1 사이클 4 — Terminated semantics + spawn fail cleanup (R1 + R2, ADR-045)", () => {
+  // R1: watchTerminated / watchOther 가 stop 진행 중 (status="stopping") 에 호출되면
+  // 이전 사이클 2 는 즉시 alreadyGone — _Terminated 받았는데 actor 진행 중_ 회귀.
+  // 사이클 4 fix 는 status="stopping" 면 watchers 등록 → onSelfTermination 이 PostStop 끝난 후 발사.
+
+  it("R1 — watchTerminated 가 stop 진행 중 호출되면 PostStop 끝까지 await", () =>
+    run(
+      Effect.gen(function* () {
+        type RootMsg = { readonly _tag: "Run" };
+        let observedDelayMillis = 0;
+        let postStopFinished = false;
+
+        const slowChild = Behaviors.receive<string>((_c, _m) =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, sig) =>
+          sig._tag === "PostStop"
+            ? Effect.sleep("100 millis").pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    postStopFinished = true;
+                  }),
+                ),
+                Effect.as(Behaviors.same<string>()),
+              )
+            : Effect.succeed(Behaviors.same()),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(slowChild, "kid");
+            return Behaviors.receiveMessage<RootMsg>((_m) =>
+              Effect.gen(function* () {
+                yield* Effect.fork(ctx.stop(c));
+                yield* Effect.sleep("10 millis"); // status="stopping" 윈도우
+                const t0 = Date.now();
+                yield* ctx.watchTerminated(c);
+                observedDelayMillis = Date.now() - t0;
+                return Behaviors.same<RootMsg>();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Run" });
+        yield* Effect.sleep("400 millis");
+        // PostStop 100ms - 10ms sleep ≈ 90ms 이상 await — Terminated = 완전히 끝 보장.
+        expect(observedDelayMillis).toBeGreaterThanOrEqual(60);
+        expect(postStopFinished).toBe(true);
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("R1 — watchTerminated return 직후 같은 이름 재spawn → 성공 (ChildNameTaken X)", () =>
+    run(
+      Effect.gen(function* () {
+        type RootMsg = { readonly _tag: "Run" };
+        let respawnSucceeded = false;
+        let firstUid = "";
+        let secondUid = "";
+
+        const slowChild = Behaviors.receive<string>((_c, _m) =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, sig) =>
+          sig._tag === "PostStop"
+            ? Effect.sleep("80 millis").pipe(
+                Effect.as(Behaviors.same<string>()),
+              )
+            : Effect.succeed(Behaviors.same()),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c1 = yield* ctx.spawn(slowChild, "kid");
+            firstUid = c1.uid;
+            return Behaviors.receiveMessage<RootMsg>((_m) =>
+              Effect.gen(function* () {
+                yield* Effect.fork(ctx.stop(c1));
+                yield* Effect.sleep("10 millis");
+                yield* ctx.watchTerminated(c1);
+                // 사이클 4 fix — Terminated 후 registry 비어 있음 보장. 재spawn 즉시 성공.
+                const c2 = yield* ctx.spawn(slowChild, "kid");
+                secondUid = c2.uid;
+                respawnSucceeded = true;
+                return Behaviors.same<RootMsg>();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Run" });
+        yield* Effect.sleep("400 millis");
+        expect(respawnSucceeded).toBe(true);
+        expect(firstUid).not.toBe(secondUid);
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("R1 — watch (Terminated signal) 이 stop 진행 중 등록되면 onSelfTermination 이 발사", () =>
+    run(
+      Effect.gen(function* () {
+        type RootMsg =
+          | { readonly _tag: "Run" }
+          | { readonly _tag: "ChildGoneSignal" };
+        let signalReceived = false;
+
+        const slowChild = Behaviors.receive<string>((_c, _m) =>
+          Effect.succeed(Behaviors.same()),
+        ).receiveSignal((_c, sig) =>
+          sig._tag === "PostStop"
+            ? Effect.sleep("60 millis").pipe(
+                Effect.as(Behaviors.same<string>()),
+              )
+            : Effect.succeed(Behaviors.same()),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(slowChild, "kid");
+            return Behaviors.receive<RootMsg>((c2, m) =>
+              Effect.gen(function* () {
+                if (m._tag === "Run") {
+                  yield* Effect.fork(ctx.stop(c));
+                  yield* Effect.sleep("10 millis");
+                  yield* c2.watch(c);
+                }
+                return Behaviors.same();
+              }),
+            ).receiveSignal((_c, sig) =>
+              Effect.sync(() => {
+                if (sig._tag === "Terminated") {
+                  signalReceived = true;
+                }
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Run" });
+        yield* Effect.sleep("300 millis");
+        expect(signalReceived).toBe(true);
+        yield* sys.shutdown;
+      }),
+    ));
+
+  // R2: spawnInternal 의 mailbox + cellScope + instanceScope 가 ChildNameTaken fail 시 cleanup.
+  // 누수 _직접 측정_ 어려움 — 간접: 다수 fail 후 system shutdown 정상 + fail path 후 같은 이름 spawn 성공.
+
+  it("R2 — ChildNameTaken 다수 fail 후 system shutdown 정상 (자료 누수 누적 X)", () =>
+    run(
+      Effect.gen(function* () {
+        type RootMsg = { readonly _tag: "Spam" };
+        let failCount = 0;
+
+        const child = Behaviors.receive<string>((_c, _m) =>
+          Effect.succeed(Behaviors.same()),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.spawn(child, "kid");
+            return Behaviors.receiveMessage<RootMsg>((_m) =>
+              Effect.gen(function* () {
+                // 50회 같은 이름 spawn 시도 — 모두 ChildNameTaken fail.
+                // tapErrorCause 의 cleanup 이 누적 안 되면 shutdown 정상.
+                for (let i = 0; i < 50; i++) {
+                  const exit = yield* Effect.exit(ctx.spawn(child, "kid"));
+                  if (exit._tag === "Failure") {
+                    const failOpt = Cause.failureOption(exit.cause);
+                    if (
+                      failOpt._tag === "Some" &&
+                      typeof failOpt.value === "object" &&
+                      failOpt.value !== null &&
+                      "_tag" in failOpt.value &&
+                      (failOpt.value as { _tag: string })._tag ===
+                        "ChildNameTaken"
+                    ) {
+                      failCount++;
+                    }
+                  }
+                }
+                return Behaviors.same<RootMsg>();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Spam" });
+        yield* Effect.sleep("100 millis");
+        expect(failCount).toBe(50);
+        yield* sys.shutdown; // hang 안 함 — 누수 누적 X 의 간접 검증
+      }),
+    ));
+
+  it("R2 — ChildNameTaken fail path 가 cleanup 하므로 첫 자식 stop 후 같은 이름 spawn 성공", () =>
+    run(
+      Effect.gen(function* () {
+        type RootMsg = { readonly _tag: "Run" };
+        let secondAttemptOk = false;
+
+        const child = Behaviors.receive<string>((_c, _m) =>
+          Effect.succeed(Behaviors.same()),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c1 = yield* ctx.spawn(child, "kid");
+            return Behaviors.receiveMessage<RootMsg>((_m) =>
+              Effect.gen(function* () {
+                // 같은 이름 두 번 fail 시도 — 둘 다 ChildNameTaken.
+                yield* Effect.exit(ctx.spawn(child, "kid"));
+                yield* Effect.exit(ctx.spawn(child, "kid"));
+                // c1 stop → 같은 이름 spawn 성공 (옛 fail path 의 cleanup 이 막힘 안 만듦).
+                yield* ctx.stop(c1);
+                const c2 = yield* ctx.spawn(child, "kid");
+                secondAttemptOk = c2.uid !== c1.uid;
+                return Behaviors.same<RootMsg>();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Run" });
+        yield* Effect.sleep("100 millis");
+        expect(secondAttemptOk).toBe(true);
+        yield* sys.shutdown;
+      }),
+    ));
+});
+
 describe("M5 후속 — Effect 밖 throw 안전망 (makeReceive Effect.suspend wrap)", () => {
   it("receiveMessage handler 가 _직접 throw_ → supervision restart 작동", () =>
     run(

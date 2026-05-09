@@ -83,6 +83,9 @@ const spawnInternal = <Msg>(
     // M∞.1 사이클 2 (ADR-044, F1): 같은 path 가 _이미 살아있는 entry_ 면 ChildNameTaken fail.
     // STM.fail → Effect fail 채널로 propagate. 사용자가 catchTag("ChildNameTaken") 로 분기 가능.
     // _stop 후_ 같은 이름 재spawn 가능 (옛 entry 가 unregister 되었으므로 resolve None).
+    // M∞.1 사이클 4 (ADR-045, R2): STM fail 시 _이미 할당된 cell + cellScope_ 누수 방지 — tapErrorCause 로
+    //   cleanup. Scope.close(cellScope) 가 instanceScope cascade close. queue shutdown 명시.
+    //   중복 spawn 빈도 0 에 가깝지만 _누수 누적_ 차단.
     const entry = yield* STM.commit(
       STM.gen(function* () {
         const existing = yield* Registry.resolve(spawnCtx.registry, args.path);
@@ -110,6 +113,14 @@ const spawnInternal = <Msg>(
         }
         return e;
       }),
+    ).pipe(
+      Effect.tapErrorCause(() =>
+        Effect.gen(function* () {
+          yield* Scope.close(cellScope, Exit.void);
+          yield* Queue.shutdown(cell.mailbox);
+          yield* Queue.shutdown(cell.signalQueue);
+        }),
+      ),
     );
 
     // 8. ActorRef + ActorContext (자기 spawn 함수 포함)
@@ -217,18 +228,39 @@ const makeChildContext = <Msg>(
   });
 
 // notifyWatchersOnSelfTermination — 자발 Stopped / supervisor stop 강등 시 messageLoop 가 호출 (M4.1 사이클 2).
-// stopActor 의 _watchers 알림 + registry unregister + parent.children 갱신_ 부분 + instanceScope close (M5 사이클 3).
-// cellScope close 는 _안 함_ — 자기 fiber 가 자기 scope 닫으면 self-interrupt 위험. cellScope 는
-// 사용자가 sys.shutdown 또는 ctx.stop 호출 시 정리 (자발 stop 후 cellScope 누수는 별도 의제 — ADR-037 후보).
-// instanceScope close — 자기 fiber 가 자기 instanceScope 안 fork (timer/scheduleOnce/사용자 fork) 모두 cancel.
-// 자기 fiber (interpreter) 는 cellScope 안이라 영향 X. ADR-039 의 _자동 cleanup_ 보장.
-// F1 fix 의 status check 로 죽어가는 watcher skip 그대로.
+// M∞.1 사이클 4 (ADR-045, R1): _watchers 스냅샷 + status="stopped" + registry unregister + parent.children 갱신_
+//   을 _한 atomic STM tx_ 로. 이전엔 unregister 가 알림 _후_ 라 watcher 깨어나는 시점에 옛 entry 가
+//   registry 에 남아있어 _즉시 재spawn → ChildNameTaken_ 회귀. 사이클 4 fix: 알림 발사 _전_ 에 unregister
+//   atomic — Terminated 받은 직후 같은 path 재spawn 가능 (Akka semantics).
+//   STM 트랜잭션이 직렬화 → watchOther 의 _stopping 상태 watch 등록_ 도 안전 (이 tx 가 commit 전이면
+//   다음 스냅샷에 잡힘, commit 후면 status="stopped" + unregister 끝, alreadyGone).
 const notifyWatchersOnSelfTermination = <Msg>(
   registry: RegistryT,
   entry: ActorEntryT<Msg>,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const watcherMap = yield* STM.commit(TRef.get(entry.watchers));
+    const parentPath = ActorPath.parent(entry.path);
+    // STM tx — watchers 스냅샷 + status="stopped" + registry unregister + parent.children atomic.
+    // 알림 발사 _전_ 에 registry 가 비워져 _Terminated 직후 재spawn_ 가능.
+    const watcherMap = yield* STM.commit(
+      STM.gen(function* () {
+        const m = yield* TRef.get(entry.watchers);
+        yield* TRef.set(entry.status, "stopped");
+        yield* Registry.unregister(registry, entry.path);
+        if (Option.isSome(parentPath)) {
+          const parentFound = yield* Registry.resolve(
+            registry,
+            parentPath.value,
+          );
+          if (Option.isSome(parentFound)) {
+            yield* TRef.update(parentFound.value.children, (c) =>
+              Chunk.filter(c, (p) => !Equal.equals(p, entry.path)),
+            );
+          }
+        }
+        return m;
+      }),
+    );
     const watcherPairs = Array.from(HashMap.entries(watcherMap));
     yield* Effect.forEach(
       watcherPairs,
@@ -258,28 +290,6 @@ const notifyWatchersOnSelfTermination = <Msg>(
           }
         }),
       { concurrency: "unbounded", discard: true },
-    );
-
-    // status=stopped (idempotent — stopActor 가 이미 set 했을 수도)
-    yield* STM.commit(TRef.set(entry.status, "stopped"));
-
-    // registry unregister + parent.children 갱신
-    const parentPath = ActorPath.parent(entry.path);
-    yield* STM.commit(
-      STM.gen(function* () {
-        yield* Registry.unregister(registry, entry.path);
-        if (Option.isSome(parentPath)) {
-          const parentFound = yield* Registry.resolve(
-            registry,
-            parentPath.value,
-          );
-          if (Option.isSome(parentFound)) {
-            yield* TRef.update(parentFound.value.children, (c) =>
-              Chunk.filter(c, (p) => !Equal.equals(p, entry.path)),
-            );
-          }
-        }
-      }),
     );
 
     // M5 사이클 3 (ADR-039): instanceScope close — 사용자 fork/timer 모두 자동 cancel.
@@ -344,10 +354,13 @@ const notifyParentOfChildFailure = <Msg>(
   });
 
 // stopActor — graceful cascade 의 핵심 흐름 (ADR-031, ARCHITECTURE §3.6).
-// 1. status = "stopped" (이후 tell 거부)
+// 1. status = "stopping" (이후 tell 거부, watch 등록은 _가능_ — onSelfTermination atomic tx 가 잡음)
+//    M∞.1 사이클 4 (ADR-045): 이전엔 즉시 "stopped" 였으나 _Terminated semantics 회귀_ —
+//    watchTerminated 받자마자 같은 이름 재spawn 하면 ChildNameTaken (registry 에 옛 entry 남아있음).
+//    "stopping" 은 _shutdown 진행 중_ 표시. "stopped" 는 onSelfTermination 끝, registry unregister 후.
 // 2. children 재귀 stop — 자식의 자식부터 (forEach unbounded — 자식들끼리 순서 무관)
 // 3. 자식 stop 끝까지 await → PostStop hook 모두 호출 보장
-// 4. 자기 PostStop offer → fiber 자발 종료 await
+// 4. 자기 PostStop offer → fiber 자발 종료 await (이 사이에 onSelfTermination 호출 — status="stopped")
 // 5. 자기 instance Scope close (자동 cleanup)
 // 6. queue cleanup
 // 7. registry unregister + parent.children 에서 제거
@@ -356,7 +369,7 @@ const stopActor = <Msg>(
   entry: ActorEntryT<Msg>,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    yield* STM.commit(TRef.set(entry.status, "stopped"));
+    yield* STM.commit(TRef.set(entry.status, "stopping"));
 
     // children 스냅샷 후 재귀 stop — _LIFO_ 순서 (마지막 spawn 자식부터, ADR-031 보강).
     // M3.1: HashSet (순서 X) → Chunk (insertion order). reverse + 순차 await 로 cascade 직렬.
@@ -409,9 +422,10 @@ const stopActorByRef = <Msg>(
 
 // ctx.watch / ctx.watchWith — 양방향 TMap 등록 (ADR-022).
 // 이미 죽은 / stale ref 면 즉시 self 에게 알림 (Akka 정통).
-// M∞.1 사이클 2 (ADR-044, F2): _atomic STM tx_ — resolve + uid 검사 + status 검사 + watchers 등록 한 트랜잭션.
-// stop 윈도우 race 차단: target.status 가 _이미 stopped_ 면 등록 안 하고 _즉시 알림 path_ 로.
-// 이전 코드는 resolve + uid 만 STM, watchers 등록 별도 STM 이라 race window 존재.
+// M∞.1 사이클 2 (ADR-044, F2): _atomic STM tx_ — resolve + uid + status 검사 + watchers 등록 한 트랜잭션.
+// M∞.1 사이클 4 (ADR-045, R1): _stopping_ 은 alreadyGone 처리 _안 함_ — onSelfTermination 의 atomic
+//   STM tx (watchers 스냅샷 + status="stopped" 전환) 가 우리 등록을 _잡아줌_. _stopped_ 만 alreadyGone.
+//   이전 사이클 2 는 stopping 도 alreadyGone 이라 _Terminated 받았는데 actor 아직 진행 중_ semantics 회귀.
 const watchOther = <Msg, Other>(
   registry: RegistryT,
   self: ActorRef<Msg>,
@@ -433,9 +447,11 @@ const watchOther = <Msg, Other>(
         }
         const otherStatus = yield* TRef.get(otherFound.value.status);
         if (otherStatus === "stopped") {
-          // 이미 죽어가는 중 — 등록하면 race 로 알림 못 받을 위험 (onSelfTermination 의 watchers 스냅샷 후일 수도).
+          // onSelfTermination 끝, registry unregister 후 — 즉시 알림.
           return "alreadyGone" as const;
         }
+        // running / stopping — watchers 에 등록. stopping 의 경우 onSelfTermination 의 다음 atomic
+        // STM tx (스냅샷 + status="stopped") 가 우리 등록을 잡아 정상 알림 발사 보장.
         yield* TRef.update(otherFound.value.watchers, (m) =>
           HashMap.set(m, selfKey, watchMsg),
         );
@@ -466,8 +482,8 @@ const watchOther = <Msg, Other>(
 
 // ctx.watchTerminated — Effect 형태 termination await (ADR-030).
 // M∞.1 사이클 2 (ADR-044, F2): _atomic STM tx_ — resolve + uid + status 검사 + Deferred 등록 한 트랜잭션.
-// 이전 코드는 resolve + uid 검사 STM, watchers 등록 별도 STM 이라 그 사이에 target 이 stop 진행 →
-// onSelfTermination 의 watchers 스냅샷 _후_ 등록되어 _영원히 await_ 위험.
+// M∞.1 사이클 4 (ADR-045, R1): _stopping_ 은 즉시 return _안 함_ — Deferred 등록 → onSelfTermination 이 발사.
+//   Akka 의 _Terminated = 완전히 끝_ semantics 보존 (이전 사이클 2 는 stopping 도 즉시 return 이라 회귀).
 // Deferred 는 STM 안에서 못 만들어서 (Effect) 미리 생성. 등록 안 하면 GC 됨 (작은 비용).
 const watchTerminatedOther = <Msg, Other>(
   registry: RegistryT,
@@ -490,6 +506,7 @@ const watchTerminatedOther = <Msg, Other>(
         if (otherStatus === "stopped") {
           return "alreadyGone" as const;
         }
+        // running / stopping — Deferred 등록. stopping 의 경우 onSelfTermination atomic STM tx 가 잡아 발사.
         yield* TRef.update(otherFound.value.watchers, (m) =>
           HashMap.set(m, selfKey, WatchMessage.Deferred(deferred)),
         );
@@ -497,7 +514,7 @@ const watchTerminatedOther = <Msg, Other>(
       }),
     );
     if (result === "alreadyGone") {
-      // 이미 죽은 / 새 incarnation / 죽어가는 중 — 즉시 끝
+      // onSelfTermination 끝, registry unregister 후 — 즉시 끝
       return;
     }
     yield* Deferred.await(deferred);
