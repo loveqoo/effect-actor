@@ -761,3 +761,15 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [process] **npm 2FA = WebAuthn/passkey (TOTP 옵션 제한).** macOS Touch ID 가 platform authenticator 로 동작 — 물리 키 없이 진행 가능. 등록 시 _이름표_ 만 입력 ("MacBook Pro" 등) → 기기 자체가 인증.
 - [insight] **3 라운드 review 패턴의 가치.** 1라운드 (사이클 f, codex 4 finding) → 2라운드 (사이클 3, R1+R2 회귀 발견) → 3라운드 (사이클 5, GATE PASS). _fix 가 새 finding 만든다_ 가설 검증 — 회귀 fix 후 _다시_ review 가 정통. 배포 전 _수렴_ 까지가 외부 검증의 진짜 사이클.
 - [insight] **0.x = 안정 약속 _없음_ 의 자유.** ADR-041 의 0.x 정책 덕에 ChildNameTaken 시그너처 변경 (사이클 2) + status 3단계 추가 (사이클 4) 모두 _배포 전_ 에 자유롭게. 1.0+ 면 _한 minor warning_ 후 제거. 0.x 의 _느슨함_ 이 학습 비용 낮춤.
+
+
+
+### 2026-05-10 — 도그푸딩 #5: 0.1.0 packaging 검증 통과 (finding 0)
+
+- [verify] **사이클 1 (smoke)**: `npm install @loveqoo/effect-actor@0.1.0` 정상 (npm `--legacy-peer-deps` 사용), import resolve OK, tsc strict (`exactOptionalPropertyTypes` + `noUncheckedIndexedAccess`) 통과, 실행 round-trip 30ms / expected 출력 정확. published tarball 깔끔 (file: dep 시절 `.git`, `AGENTS.md` 흔적 0).
+- [verify] **사이클 2 (IDE + 도메인)**: `.d.ts` + `.d.ts.map` 모두 패키지 포함 — 정의 추적 가능. tsc 가 모든 import 의 generic/overload 정확 해석. **도메인 사이클 = ADR-045 의 watchTerminated + 재spawn** 정확 동작 (`echoes1 = ["from-w1"]`, `echoes2 = ["from-w2"]`, terminatedSeen 1회) — _배포한 코드_ 가 사이클 4 fix 의 semantics 보존.
+- [verify] poly-phony agent 119/120 (1 skipped 무관), 회귀 0, 3회 flake-free 5.88s.
+- [observation] **`--legacy-peer-deps` 필요했음** — npm 의 strict peer dep 처리. pnpm 은 일반적으로 자동 처리. 0.1.1 docs patch 후보 (README 에 npm 시 안내).
+- [insight] **packaging DoD = _진짜 published tarball + 진짜 IDE_.** source-direct 도그푸딩 (#4) 은 _기능_ 검증 — exports / .d.ts / IDE 는 검증 안 됨. #5 가 그 layer 메움. 향후 라이브러리 첫 배포마다 _이 사이클 _ 필수.
+- [insight] **ADR-045 의 _배포 환경_ 검증.** 사이클 4 의 fix (Terminated semantics 보존) 가 _내부 테스트_ 가 아닌 _진짜 dist/ + npm install + 다른 워크스페이스_ 에서도 정확 동작. 사이클 4 의 회귀 테스트 5개 가 _사용자 측 환경_ 에서도 같은 보장 — TDD + packaging dogfood 이 _모든 layer 검증_.
+- [milestone] **M∞ _전체_ DoD 🟢 (2026-05-10)**. (a)~(g) + M∞.1 환류 5 사이클 + 도그푸딩 #5. 남은 (d) TMap upstream PR 은 _별도 의제_ — 우리 측 우회 (ADR-031 보강) 가 0.1.0 에서 정상 동작 확인됨.

@@ -13,7 +13,7 @@
 | #2 | M3 끝 | 2026-05-09 | 5 사이클 / 9 테스트 / 1 BUG (spawn race) → M3.1 환류 |
 | #3 | M4 끝 | 2026-05-09 | 5 사이클 / 4 finding → M4.1 환류 (cleanup 통일) |
 | #4 | **M5 끝** | 2026-05-09 | **통과** — 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. 5 cliff 모두 안정. M5 _전체_ DoD 🟢. M∞ 진입 가능. |
-| #5 | **0.1.0 배포 직후** | 2026-05-10 | **packaging 검증** — source-direct (#4) 가 아닌 _진짜 npm install + dist/_. exports / .d.ts.map / IDE / ESM / peer dep. 진행 중. |
+| #5 | **0.1.0 배포 직후** | 2026-05-10 | **통과** — 2 사이클, finding 0, 회귀 0, 3회 flake-free. `npm install` (legacy-peer-deps) → import / tsc strict / 실행 모두 OK. `.d.ts.map` 포함 IDE 친화. 도메인 사이클 (ADR-045 watchTerminated + 재spawn) 정확. **0.1.0 packaging DoD 🟢.** |
 
 #1~#3 은 _가벼운 도그푸딩_ (~1주 한정). **#4 부터 _본격_** — poly-phony 가 effect-actor 위에 _진짜 agent_ 를 만들면서 _모든 표면_ (M1~M5) 사용. 환류 사이클 (M5.1+) 가능성 열어둠.
 
