@@ -77,6 +77,9 @@ Effect.runPromise(program);
 | `Behaviors.unhandled<M>()` | M3: signal handler 가 Unhandled 반환 + Terminated → DeathPact fail |
 | `Behaviors.withMailbox(inner, policy)` | 메일박스 정책 부착 (래퍼) |
 | `Behaviors.receive(...).receiveSignal(...)` | 신호 핸들러 fluent 부착 (PostStop, PreRestart, Terminated, ChildFailed) |
+| `Behaviors.supervise(b).onFailure(matcher, strategy)` | M4: supervisor 정책 부착. `Strategies.{resume,restart,stop}` + `matchInstance/matchTag/matchAll` |
+| `Behaviors.withTimers<M>((timers) => Effect<Behavior<M>>)` | M5 사이클 3 (ADR-039): timer 등록 표면. setup 위 헬퍼. |
+| `Behaviors.withStash<M>(capacity, (stash) => Effect<Behavior<M>>)` | M5 사이클 4 (ADR-040): bounded buffer + unstashAll. setup 위 헬퍼. |
 
 핸들러의 fail 채널은 `unknown` — `Effect.fail(any)` / `Effect.die(any)` 모두 supervision 외피의 default stop 으로 흡수 (액터 _자발 종료_ 와 동일 효과, M4 부터 restart 정책). _M3 추가:_ supervision 외피가 cause 를 부모에게 `ChildFailed` 로 알림.
 
@@ -93,6 +96,8 @@ Effect.runPromise(program);
 | `ctx.unwatch(other): Effect<void>` | watch 취소 |
 | `ctx.watchTerminated(other): Effect<void>` | other stop 까지 Effect 형태 await (ADR-030) — Deferred 직접 등록 |
 | `ctx.ask<TargetMsg, Resp>(target, make, timeout): Effect<Resp, AskTimeout>` | ask 패턴 — 임시 actor + race(reply, timeout). typed reply err 는 reply ADT 안에 표현 (ADR-029) |
+| `ctx.fork<A, E>(eff): Effect<RuntimeFiber<A, E>>` | M5 사이클 3 (ADR-039): instance scope 안 fork. restart/stop 시 자동 interrupt. |
+| `ctx.scheduleOnce<M>(delay, target, msg): Effect<void>` | M5 사이클 3 (ADR-039): delay 후 다른 액터에 tell (fire-and-forget, ctx.fork 안 wrapping) |
 
 ---
 
@@ -355,11 +360,13 @@ const slowConsumer = Behaviors.withMailbox(
 
 ```typescript
 import { ActorNotFound, AskTimeout, DeathPactException,
-  IncarnationMismatch, MailboxFull } from "...";
+  IncarnationMismatch, MailboxFull, RestartLimitExceeded, StashOverflow } from "...";
 
 // ActorNotFound / IncarnationMismatch / MailboxFull — 정의 들어 있지만 silent dead letter 로 처리 (Akka 원래 모양).
 // AskTimeout — ctx.ask 의 fail 채널 (M3, 사용자가 catchTag 로 처리).
 // DeathPactException — watch + Terminated unhandled 시 watcher 의 fail 채널 (M3, supervision 외피가 잡아서 부모에게 ChildFailed 발사).
+// RestartLimitExceeded — M5 사이클 1: restart.withLimit 한도 초과 시 stop 강등의 cause (사용자 onFailure 에 다시 안 잡힘 — supervise 외피 안쪽에서 발생).
+// StashOverflow — M5 사이클 4: withStash buffer 용량 초과 시 stash() fail 채널. catchTag 또는 Strategies.matchTag("StashOverflow") 로 분기.
 ```
 
 ---
@@ -368,12 +375,18 @@ import { ActorNotFound, AskTimeout, DeathPactException,
 
 | 기능 | 어느 마일스톤 |
 |---|---|
-| `Behaviors.supervise(...).onFailure(...)` | M4 (현재는 default stop 만) |
-| restart + ref 안정성 | M4 (mailbox 보존은 _구조적으로 준비_, 정책은 미구현) |
-| `ref.ask` (외부 Effect 에서 호출) | M3 후 / M4 (현재는 `ctx.ask` 만 — actor handler 안에서) |
-| `withTimers` / `scheduleOnce` | M5 |
-| `withStash` | M5 |
-| `restartWithBackoff` | M5 |
+| `ref.ask` (외부 Effect 에서 호출) | _미정_ (현재는 `ctx.ask` 만 — actor handler 안에서) |
+| `Strategies.restartWithBackoff(...).withResetBackoffAfter(...)` | _미구현_ (Akka 별도. 현재 `withLimit` 윈도우와 묶여 있음 — 효과 일부) |
+| `Strategies.matchSchema(...)` (Effect Schema 기반) | _시안_ (도그푸딩 입력 후) |
+| `unstash(behavior, n)` 부분 unstash | _미구현_ (Akka 별도, 사이클 4 단순) |
+| `startTimerAtFixedRate` | _미구현_ (Akka 별도, fixedDelay 만 — 도그푸딩 입력 후) |
+
+M4/M5 _구현_:
+- `Behaviors.supervise(...).onFailure(matcher, strategy)` — ✅ M4
+- `Strategies.restart.withLimit({ maxNrOfRetries, withinTimeRange })` — ✅ M5 사이클 1 (ADR-037)
+- `Strategies.restartWithBackoff({ minBackoff, maxBackoff, randomFactor })` — ✅ M5 사이클 2 (ADR-038)
+- `Behaviors.withTimers` + `ctx.fork` + `ctx.scheduleOnce` — ✅ M5 사이클 3 (ADR-039)
+- `Behaviors.withStash` + `StashOverflow` — ✅ M5 사이클 4 (ADR-040)
 
 도그푸딩에서 `ref.ask` 가 필요하면 _bootstrap actor_ 패턴 우회 — root 가 외부 Deferred 받아 그 안에서 ctx.ask 호출.
 

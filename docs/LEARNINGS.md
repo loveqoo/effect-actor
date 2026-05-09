@@ -584,3 +584,13 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [bug+process] **테스트 작성 중 _Effect 밖 직접 throw_ 가 supervision 통과 X 발견.** `(m) => { if Boom throw }` 직접 throw 면 `interpretStep` 의 `Effect.map(handler(ctx, msg), ...)` 가 만들어지기 _전_ throw → `messageLoop` 의 `Effect.exit(stepEffect)` 가 못 잡음. 기존 supervision 테스트는 모두 `Effect.sync(() => { throw })` 패턴 — 일관 안 했음. fix 1: 테스트를 `Effect.suspend(() => { ... throw ... })` 로 wrap. fix 2 (별도 후보): `makeReceive` 안에서 handler 호출을 `Effect.suspend` 로 감싸기 — 사용자 직접 throw 도 잡힘. 사이클 4 범위 밖 — ADR-040 후속 + LEARNINGS 만 박음.
 - [test] 5 통합 + 1 단위 (errors.test.ts) = 6 테스트 추가 (총 197): 기본 stash→unstashAll 순서, size/isEmpty/clear, isFull/overflow catch, supervision 결합 (matchTag restart), restart 시 buffer 자동 비움. 5회 flake-free.
 - [insight] **사이클 3+4 의 패턴 동형성.** 둘 다 setup 위 헬퍼 + Effect 인터페이스 + restart 시 자동 비움. 다른 점은 _instance scope 자원 (timers)_ vs _logical buffer (stash)_. 사이클 4 는 instance scope 안 fork 안 씀 — `unstashAll` 이 _자기 fiber_ 안 직접 step 호출. 같은 빌더 패턴 다른 자원 모델. 사용자 학습 비용 작음.
+
+
+
+### 2026-05-09 — M5 사이클 5 (examples/06~08 + USAGE.md 갱신)
+
+- [process] **examples 3개 모두 `pnpm tsx` 실행 검증** — 06-backoff (setup #1~4 + 200/400/800ms 점진 + 한도 초과 stop), 07-stash (happy: 3 stash → unstashAll 순서 보존 / overflow: 3번째 fail → restart → 새 buffer), 08-timer (heartbeat 3회 + cancel + OneShot + scheduleOnce + ctx.fork stop 시 자동 cancel). _문서가 아닌 실측 동작_ 으로 검증.
+- [insight] **examples 작성 = 사용자 표면의 _체험_ — 표면 어색함 1차 발견 기회.** 사이클 4 LEARNINGS 의 _Effect 밖 throw_ cliff 가 examples 06 작성 시 다시 노출되지 않게 _Effect.sync 안에서 throw_ 패턴을 _examples 의 공식 패턴_ 으로 굳힘 (05-restart 와 일관). 사용자가 examples 모방하면 cliff 안 부딪힘.
+- [process] USAGE.md 갱신 — _Behaviors 빌더 카탈로그_ + _ActorContext 표면_ + _Tagged Errors_ + _안 되는 것_ 표 모두 M5 표면 (withTimers / withStash / restartWithBackoff / withLimit / ctx.fork / scheduleOnce + RestartLimitExceeded / StashOverflow) 추가. _안 되는 것_ 표는 _진짜 미구현_ (ref.ask, withResetBackoffAfter, matchSchema, unstash 부분, startTimerAtFixedRate) 만 남김. M5 코드 끝 시점의 _현재 표면_ 한 표로 정리.
+- [process] M5 사이클 5 = 코드 _DoD 끝_, 본격 도그푸딩 (M5.1) 만 남음. M3.1, M4.1 패턴 그대로 — 환류 사이클 입력 후 _M5 전체 DoD 🟢_.
+- [process] 다음 갈래: (a) M5.1 본격 도그푸딩 _즉시_ — poly-phony 측 전면 사용 가이드, (b) _Effect 밖 throw_ 의 makeReceive fix 미니 사이클 (사이클 5 LEARNINGS 의 후속 후보) 먼저 박고 도그푸딩 입력, (c) Effect TMap upstream PR (#6225 follow-up). _라이브러리 설계 우선_ 정신상 (b) → (a) 순서 자연스러움.

@@ -7,9 +7,9 @@
 | 항목 | 상태 |
 |---|---|
 | 버전 | 0.0.0 (미배포) |
-| 마일스톤 | M0~M4 완료 (Supervision 환류 + 재검증 통과) |
+| 마일스톤 | M0~M4 완료 + M5 코드 완료 (본격 도그푸딩 대기) |
 | npm 패키지 | _M5+ 도그푸딩 후 배포 예정_ |
-| 코드 | _M4: supervise/resume/restart/stop + 매처 헬퍼 + Scope 분리 (ADR-035) + 환류 fix (F1/의제 1+2). 161 테스트, examples/01~05 실행 가능._ |
+| 코드 | _M5: restart.withLimit + restartWithBackoff + withTimers/ctx.fork/scheduleOnce + withStash. 197 테스트, examples/01~08 실행 가능._ |
 
 ## 무엇인가
 
@@ -49,7 +49,7 @@ _실제 동작 코드는 M1 마일스톤 완료 시 [examples/01-restart-demo.ts
 | M3 | 🟢 완료 | ctx.stop graceful + watch / watchWith / watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1 | 🟢 완료 | spawn race fix — Deferred latch happens-before + Effect 3.21.2 TMap.remove 본체 버그 우회. 118 테스트, consumer 측 9ms / 5회 flake-free 검증 |
 | M4 | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 + 환류 fix (F1 / 의제 1+2). examples/05 동작. 161 테스트, consumer 측 25회 flake-free. |
-| M5 | 🟡 진행 중 | Backoff / Stash / Timer. _사이클 1~4 완료 (ADR-037~040)._ examples + 본격 도그푸딩 남음. 197 테스트 |
+| M5 | 🟡 코드 완료 | Backoff / Stash / Timer + examples 06~08 (ADR-037~040). 197 테스트. _본격 도그푸딩 (M5.1) 만 남음._ |
 | M∞ | ⚪ 대기 | poly-phony 도그푸딩 → npm 배포 |
 
 자세한 진행 상황은 [docs/PLAN.md](./docs/PLAN.md).
