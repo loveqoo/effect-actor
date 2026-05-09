@@ -10,9 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 _Pending changes here._
 
-## [0.1.0] - 2026-05-09
+## [0.1.0] - 2026-05-10
 
-First public release. Output of milestones M0 through M5, validated by 4 dogfooding rounds against [poly-phony](https://github.com/loveqoo/poly-phony).
+First public release. Output of milestones M0 through M5 plus the M∞.1 review-feedback cycles (ADR-043/044/045), validated by 4 dogfooding rounds against [poly-phony](https://github.com/loveqoo/poly-phony) and 3 rounds of external `codex review` before publish.
 
 ### Added
 
@@ -32,8 +32,9 @@ First public release. Output of milestones M0 through M5, validated by 4 dogfood
 - `Behaviors.withStash(capacity, (stash) => ...)` — bounded stash buffer
 
 #### ActorContext
-- `ctx.spawn` / `ctx.stop` — child lifecycle (graceful cascade, ADR-031)
-- `ctx.watch` / `watchWith` / `unwatch` / `watchTerminated` — termination monitoring (ADR-022, ADR-030)
+- `ctx.spawn(behavior, name)` — child lifecycle. Fail channel: `ChildNameTaken` when a live child already owns the name (ADR-044). Stop the existing child first to free the name.
+- `ctx.stop` — graceful cascade (ADR-031)
+- `ctx.watch` / `watchWith` / `unwatch` / `watchTerminated` — termination monitoring (ADR-022, ADR-030). `Terminated` / `watchTerminated.await` complete only after the target actor is fully unregistered (ADR-045) — re-spawning the same path immediately afterwards is safe.
 - `ctx.ask<TargetMsg, Resp>(target, make, timeout)` — request-response (ADR-029)
 - `ctx.fork(eff)` — fork in instance scope (auto-cancel on restart/stop)
 - `ctx.scheduleOnce(delay, target, msg)` — delayed `tell` to another actor
@@ -54,6 +55,7 @@ First public release. Output of milestones M0 through M5, validated by 4 dogfood
 - `DeathPactException` (ADR-022)
 - `RestartLimitExceeded` (ADR-037)
 - `StashOverflow` (ADR-040)
+- `ChildNameTaken` (ADR-044) — `ctx.spawn` fail channel when path is occupied by a live child
 
 #### Utilities
 - `Timers` interface — `startSingleTimer` / `startTimerWithFixedDelay` / `cancel` / `cancelAll` / `isActive` (ADR-039)
@@ -70,6 +72,11 @@ First public release. Output of milestones M0 through M5, validated by 4 dogfood
 - `examples/06-backoff.ts` — restartWithBackoff with progressive delay
 - `examples/07-stash.ts` — initialization stash + StashOverflow supervision
 - `examples/08-timer.ts` — heartbeat + scheduleOnce + ctx.fork
+
+#### Pre-release hardening (M∞.1)
+- ADR-043 — interpreter cleanup single source. `runInterpreter`'s `catchAllCause` is the one place that emits `onSelfTermination`, ensuring it runs exactly once across `Setup` failure, voluntary `Stopped`, and supervisor stop demotion.
+- ADR-044 — atomic STM transactions for `spawn` and `watch`. Eliminates race windows around child registration and watcher registration during shutdown.
+- ADR-045 — `Terminated` semantics preservation. Three-state lifecycle (`running` / `stopping` / `stopped`); `Terminated` and `watchTerminated.await` complete only after the actor is fully unregistered, so immediate same-path re-spawn is safe. `spawn` failure path releases preallocated mailbox and scopes.
 
 ### Notes
 - ESM only (no CJS). Node 20+.

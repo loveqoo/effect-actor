@@ -1,6 +1,6 @@
 {
   "name": "@loveqoo/effect-actor",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "EffectTS 기반 Akka Typed 스타일 Actor 라이브러리",
   "type": "module",
   "license": "MIT",
