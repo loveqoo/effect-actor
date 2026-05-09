@@ -572,3 +572,15 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [test] 9 테스트 추가 (총 191): startSingleTimer / fixedDelay / cancel / cancelAll / isActive / key 충돌 대체 / scheduleOnce / ctx.fork stop 자동 interrupt / restart 시 timer cleanup. 모두 통합 (Effect runtime + 시간 측정). 5회 flake-free. 시간 측정은 _최소 임계값_ (예: `> 5`) 만 사용 — 환경별 flake 방지.
 - [process] 표면 추가가 stub helpers (test/helpers.ts) 에도 영향 — `stubFork` + `stubScheduleOnce` 추가. context.test.ts + interpreter.test.ts 의 `ActorContext.make` 호출에도 새 파라미터. 기존 코드 변경 비용 명시 — _단위 테스트의 stub 완전성_ 을 신호로 보면 ADT 변경 비용 측정 가능.
 - [process] timers.ts 의 `key → fiber` 추적 자료구조 — `TRef<HashMap<string, Fiber>>` 로 STM 안에서 idempotent 갱신 (replaceFiber 의 atomic interrupt-then-set). cell 외부 자료구조라 STM 단독 OK.
+
+
+
+### 2026-05-09 — M5 사이클 4 (withStash + StashOverflow, ADR-040)
+
+- [design] **`Behaviors.withStash` = setup 위 헬퍼 (사이클 3 패턴 동일).** `{ _tag: "Setup", init: (ctx) => Effect.flatMap(makeStash({capacity, ctx}), f) }`. 새 ADT 노드 X. _두 사이클 연속 같은 패턴_ — `withTimers` + `withStash` 가 자료구조 다르지만 _빌더 형태 동형_. 사용자 학습 표면 단일.
+- [design] **`unstashAll(next)` = `interpretStep` 직접 적용 (option B).** Akka 정통 — stashed 메시지가 mailbox 새 메시지보다 _먼저_ 처리. mailbox re-offer (option A) 는 FIFO 라 _순서 섞임_ 위험. interpretStep 직접 적용은 _next behavior 가 메시지 받음_ → 결과가 _최종_ behavior. 다음 mailbox 부터 새 behavior 가 받음. 도중 Stopped → 즉시 멈춤 (남은 메시지 자동 버림).
+- [design] **buffer = `TRef<Chunk<Msg>>` (Effect Queue 안 씀).** Effect Queue 도 capacity 있지만 _STM 트랜잭션 외부_ → capacity 검사 + append 가 atomic 안 됨. TRef + Chunk 는 STM 안 _하나의 트랜잭션_ — race 안전.
+- [design] **StashOverflow = Tagged err, `stash()` fail 채널.** `Effect.Effect<void, StashOverflow>` — 사용자가 `Effect.catchTag("StashOverflow", ...)` 또는 supervision 의 `Strategies.matchTag("StashOverflow")` 로 분기. ADR-012 의 _계층적 에러 어휘_ + ARCHITECTURE §4.5 의 _StashOverflow → supervision 대상_ 약속 그대로.
+- [bug+process] **테스트 작성 중 _Effect 밖 직접 throw_ 가 supervision 통과 X 발견.** `(m) => { if Boom throw }` 직접 throw 면 `interpretStep` 의 `Effect.map(handler(ctx, msg), ...)` 가 만들어지기 _전_ throw → `messageLoop` 의 `Effect.exit(stepEffect)` 가 못 잡음. 기존 supervision 테스트는 모두 `Effect.sync(() => { throw })` 패턴 — 일관 안 했음. fix 1: 테스트를 `Effect.suspend(() => { ... throw ... })` 로 wrap. fix 2 (별도 후보): `makeReceive` 안에서 handler 호출을 `Effect.suspend` 로 감싸기 — 사용자 직접 throw 도 잡힘. 사이클 4 범위 밖 — ADR-040 후속 + LEARNINGS 만 박음.
+- [test] 5 통합 + 1 단위 (errors.test.ts) = 6 테스트 추가 (총 197): 기본 stash→unstashAll 순서, size/isEmpty/clear, isFull/overflow catch, supervision 결합 (matchTag restart), restart 시 buffer 자동 비움. 5회 flake-free.
+- [insight] **사이클 3+4 의 패턴 동형성.** 둘 다 setup 위 헬퍼 + Effect 인터페이스 + restart 시 자동 비움. 다른 점은 _instance scope 자원 (timers)_ vs _logical buffer (stash)_. 사이클 4 는 instance scope 안 fork 안 씀 — `unstashAll` 이 _자기 fiber_ 안 직접 step 호출. 같은 빌더 패턴 다른 자원 모델. 사용자 학습 비용 작음.

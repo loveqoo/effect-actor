@@ -1329,6 +1329,84 @@ Behaviors.setup((ctx) => Effect.sync(() =>
 
 ---
 
+## ADR-040: Behaviors.withStash + StashOverflow + unstashAll 의 직접 적용 (M5 사이클 4)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M5 사이클 4 — Akka Typed 의 `Behaviors.withStash` + `StashBuffer` 매핑
+
+### 맥락
+사이클 3 의 `withTimers` 패턴 (setup 위 헬퍼) 그대로 적용 가능. 사이클 4 의 거리:
+
+1. **`unstashAll` 의 메시지 처리 방식** — option A: stashed 메시지를 mailbox 에 다시 offer (단순, 그러나 _순서 섞임_), option B: `interpretStep` 직접 적용 (Akka 정통, 정확).
+2. **buffer 자료구조** — `TRef<Chunk<Msg>>` (단순, STM 안 idempotent) vs Effect Queue (capacity 내장).
+3. **StashOverflow 의 fail 채널 전파** — `stash()` 가 typed err 반환 → 사용자 catch 또는 supervision 분기.
+4. **unstashAll 도중 step fail / Stopped** — propagate vs 부분 처리.
+
+### 결정
+
+**A. `unstashAll(next)` = `interpretStep` 직접 적용 (option B).**
+
+```ts
+const unstashAll = (next: Behavior<Msg>): Effect.Effect<Behavior<Msg>, unknown> =>
+  Effect.gen(function* () {
+    const drained = yield* STM.commit(...);  // buffer 비우고 메시지 배열 추출
+    let cur: Behavior<Msg> = next;
+    for (const msg of drained) {
+      cur = yield* interpretStep(cur, ctx, msg);
+      if (cur._tag === "Stopped") return cur;
+    }
+    return cur;
+  });
+```
+
+이유:
+- (+) Akka 정통 — _stashed 메시지가 mailbox 새 메시지보다 먼저_ 처리. mailbox FIFO + offer 패턴은 이 순서 보장 X (offer 가 _현재 mailbox 끝_ 에 추가).
+- (+) `next` 자체가 _stashed 메시지를 처리하는 새 behavior_ → unstashAll 결과가 _최종_ behavior. 다음 mailbox 메시지부터 새 behavior 가 받음.
+- (+) 도중 Stopped 면 즉시 멈춤 — _자발 종료_ 의미 보존 (남은 stashed 메시지 자동 버림).
+- (-) `unstashAll` 의 fail 채널 = `unknown` (interpretStep 의 BehaviorEffect 도 unknown). 사용자 표면에서 `Effect.Effect<Behavior<Msg>, unknown>`. 일관 — 다른 Behavior 흐름과 동일.
+
+**B. buffer = `TRef<Chunk<Msg>>` (단순).**
+
+- Effect Queue 도 capacity 가능하지만 _STM 트랜잭션 외부_ — capacity 검사 + append 가 _atomic_ 안 됨.
+- TRef<Chunk> 는 STM 안에서 `size 검사 → fail | append` 하나의 트랜잭션. race 안전.
+- Chunk 의 immutable append/clear 가 단순.
+
+**C. StashOverflow = Tagged error, fail 채널 전파.**
+
+```ts
+readonly stash: (msg: Msg) => Effect.Effect<void, StashOverflow>;
+```
+
+- 사용자가 _명시 catch_ 가능: `stash.stash(m).pipe(Effect.catchTag("StashOverflow", () => ...))`.
+- catch 안 하면 step fail → supervision 분기 — 기존 ADT (`Strategies.matchTag("StashOverflow")`) 그대로.
+- ADR-012 의 _계층적 에러 어휘_ + ARCHITECTURE.md §4.5 의 _StashOverflow → supervision 대상_ 약속 그대로.
+
+**D. unstashAll 도중 step fail = propagate.**
+
+interpretStep 가 fail/die 면 unstashAll 의 generator 가 그대로 propagate. 외부 `messageLoop` 가 잡고 supervision 분기. 즉 사용자 handler 가 stashed 메시지 처리 도중 fail 하면 _Restart 시 stash buffer 새로_ — _자연스러운 의미_.
+
+### 결과
+- (+) Akka 시그너처 그대로 — `Behaviors.withStash[T](capacity) { stash => ... }`.
+- (+) Akka 정통 순서 보장 — stashed 메시지가 mailbox 새 메시지보다 먼저.
+- (+) restart 시 buffer 자동 비움 (사이클 3 의 `withTimers` 와 동형 — setup 재실행 = 새 인스턴스).
+- (+) supervision 결합 자연 — `Strategies.matchTag("StashOverflow")` 로 명시적 정책.
+- (+) 새 ADT 노드 X — 사이클 3 패턴 일관.
+- (-) `interpretStep` 가 사용자 표면에 노출됨 (이미 index.ts 에 export). _사용자 직접 호출 안 권장_ 이지만 stash 가 internal-only 였으면 더 깔끔. 일단 _internal-public_ 그대로.
+- (-) Akka 의 `unstashAll(behavior, numberOfMessages?)` 부분 unstash 는 _미지원_ — 사이클 4 단순. 도그푸딩 입력 후.
+
+### 후속 (M5+)
+- `unstash(behavior, n)` 부분 unstash — Akka 별도 메서드.
+- _stash 메시지 인덱싱 / 필터링_ — Akka 미지원이라 우리도 안 함.
+
+### 부가 발견 — _Effect 밖 throw_ 가 supervision 통과 X (테스트 작성 중 노출)
+사이클 4 테스트 작성 중 `(m) => { if Boom throw }` 같은 _직접 throw_ 가 fiber die 로 propagate 되지 _않음_ 발견. handler 호출 _자체_ 가 throw → `interpretStep` 의 `Effect.map(handler(ctx, msg), ...)` 가 만들어지기 _전_ 에 throw → `messageLoop` 의 `Effect.exit(stepEffect)` 가 못 잡음.
+
+**현재 _공식_ 패턴**: 사용자가 `Effect.sync(() => { ... throw ... })` 또는 `Effect.suspend(() => ...)` 안에서 throw — 기존 supervision 테스트들 모두 이 패턴.
+
+**별도 fix 후보 (이 ADR 범위 밖)**: `receiveMessage` / `receive` 의 makeReceive 안에서 `Effect.suspend(() => handle(...))` 로 lazy thunk wrap. 사용자가 _직접 throw_ 도 잡힘. 단순 fix 1줄 — 별도 사이클에서 결정.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

@@ -21,6 +21,7 @@ export {
   IncarnationMismatch,
   MailboxFull,
   RestartLimitExceeded,
+  StashOverflow,
 } from "./errors.js";
 
 // 내부 자료구조 (사용자 직접 접근은 거의 없음)
@@ -59,6 +60,9 @@ export {
 
 // timers (M5 사이클 3)
 export type { Timers } from "./timers.js";
+
+// stash (M5 사이클 4)
+export type { Stash } from "./stash.js";
 
 // system (사용자 entry point)
 export { ActorSystem } from "./system.js";

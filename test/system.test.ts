@@ -2034,3 +2034,239 @@ describe("M5 사이클 3 — Behaviors.withTimers + ctx.fork + ctx.scheduleOnce 
       }),
     ));
 });
+
+describe("M5 사이클 4 — Behaviors.withStash + StashOverflow (ADR-040)", () => {
+  it("기본 흐름 — stash 모았다가 unstashAll 후 새 behavior 가 처리", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+
+        type Msg =
+          | { readonly _tag: "Init" }
+          | { readonly _tag: "Work"; readonly id: string };
+
+        const ready = Behaviors.receiveMessage<Msg>((m) =>
+          Effect.sync(() => {
+            if (m._tag === "Work") seen.push(m.id);
+            return Behaviors.same();
+          }),
+        );
+
+        const root = Behaviors.withStash<Msg>(100, (stash) =>
+          Effect.sync(() =>
+            Behaviors.receiveMessage<Msg>((m) => {
+              if (m._tag === "Init") {
+                return stash.unstashAll(ready);
+              }
+              return stash
+                .stash(m)
+                .pipe(Effect.as(Behaviors.same<Msg>()));
+            }),
+          ),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Work", id: "a" });
+        yield* sys.root.tell({ _tag: "Work", id: "b" });
+        yield* sys.root.tell({ _tag: "Init" });
+        yield* sys.root.tell({ _tag: "Work", id: "c" });
+        yield* Effect.sleep("80 millis");
+
+        // stash 순서 보존: a, b 가 unstashAll 시 처리, 그 후 c
+        expect(seen).toEqual(["a", "b", "c"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("Stash.size / isEmpty — stash + clear 정확", () =>
+    run(
+      Effect.gen(function* () {
+        let size0 = -1;
+        let isEmpty0 = false;
+        let size2 = -1;
+        let sizeAfterClear = -1;
+
+        type Msg = { readonly _tag: "Done" };
+
+        const root = Behaviors.withStash<Msg>(10, (stash) =>
+          Effect.gen(function* () {
+            size0 = yield* stash.size;
+            isEmpty0 = yield* stash.isEmpty;
+            yield* stash.stash({ _tag: "Done" });
+            yield* stash.stash({ _tag: "Done" });
+            size2 = yield* stash.size;
+            yield* stash.clear;
+            sizeAfterClear = yield* stash.size;
+            return Behaviors.receiveMessage<Msg>((_m) =>
+              Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("30 millis");
+
+        expect(size0).toBe(0);
+        expect(isEmpty0).toBe(true);
+        expect(size2).toBe(2);
+        expect(sizeAfterClear).toBe(0);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("Stash.isFull — capacity 도달 시 true, 초과 시 StashOverflow fail", () =>
+    run(
+      Effect.gen(function* () {
+        let isFullBefore = true;
+        let isFullAfter = false;
+        let overflowCaught = false;
+
+        type Msg = { readonly _tag: "Tick" };
+
+        const root = Behaviors.withStash<Msg>(2, (stash) =>
+          Effect.gen(function* () {
+            isFullBefore = yield* stash.isFull;
+            yield* stash.stash({ _tag: "Tick" });
+            yield* stash.stash({ _tag: "Tick" });
+            isFullAfter = yield* stash.isFull;
+            // 3번째 stash → StashOverflow fail (catch)
+            yield* stash.stash({ _tag: "Tick" }).pipe(
+              Effect.catchTag("StashOverflow", () =>
+                Effect.sync(() => {
+                  overflowCaught = true;
+                }),
+              ),
+            );
+            return Behaviors.receiveMessage<Msg>((_m) =>
+              Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("30 millis");
+
+        expect(isFullBefore).toBe(false);
+        expect(isFullAfter).toBe(true);
+        expect(overflowCaught).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("StashOverflow — 사용자가 catch 안 하면 step fail → supervision 분기 (restart strategy)", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+        const seen: Array<string> = [];
+
+        type Msg =
+          | { readonly _tag: "Init" }
+          | { readonly _tag: "Work"; readonly id: string };
+
+        const ready = Behaviors.receiveMessage<Msg>((m) =>
+          Effect.sync(() => {
+            if (m._tag === "Work") seen.push(m.id);
+            return Behaviors.same();
+          }),
+        );
+
+        const inner = Behaviors.setup<Msg>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.withStash<Msg>(1, (stash) =>
+              Effect.sync(() =>
+                Behaviors.receiveMessage<Msg>((m) => {
+                  if (m._tag === "Init") return stash.unstashAll(ready);
+                  // catch 안 함 — overflow → step fail → restart
+                  return stash
+                    .stash(m)
+                    .pipe(Effect.as(Behaviors.same<Msg>()));
+                }),
+              ),
+            );
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchTag("StashOverflow"),
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(supervised, "demo");
+        yield* sys.root.tell({ _tag: "Work", id: "a" }); // 1번째 stash OK
+        yield* sys.root.tell({ _tag: "Work", id: "b" }); // 2번째 → overflow → restart
+        yield* Effect.sleep("80 millis");
+        // restart 후 stash 비워짐 (새 setup → 새 buffer)
+        yield* sys.root.tell({ _tag: "Init" });
+        yield* sys.root.tell({ _tag: "Work", id: "c" });
+        yield* Effect.sleep("60 millis");
+
+        expect(setupCount).toBeGreaterThanOrEqual(2); // restart 확인
+        expect(seen).toContain("c"); // restart 후 정상
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("restart 시 stash buffer 자동 비워짐 (새 setup → 새 buffer)", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+        const sizeAfterRestart: Array<number> = [];
+
+        type Msg =
+          | { readonly _tag: "Boom" }
+          | { readonly _tag: "CheckSize" }
+          | { readonly _tag: "Tick" };
+
+        const inner = Behaviors.setup<Msg>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.withStash<Msg>(10, (stash) =>
+              Effect.sync(() =>
+                Behaviors.receiveMessage<Msg>((m) =>
+                  Effect.suspend(() => {
+                    if (m._tag === "Boom") throw new Error("boom");
+                    if (m._tag === "CheckSize") {
+                      return stash.size.pipe(
+                        Effect.tap((n) =>
+                          Effect.sync(() => sizeAfterRestart.push(n)),
+                        ),
+                        Effect.as(Behaviors.same<Msg>()),
+                      );
+                    }
+                    return stash
+                      .stash(m)
+                      .pipe(Effect.as(Behaviors.same<Msg>()));
+                  }),
+                ),
+              ),
+            );
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchAll,
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(supervised, "demo");
+        yield* sys.root.tell({ _tag: "Tick" });
+        yield* sys.root.tell({ _tag: "Tick" });
+        yield* sys.root.tell({ _tag: "Tick" });
+        yield* sys.root.tell({ _tag: "Boom" }); // restart → 새 buffer
+        yield* Effect.sleep("80 millis");
+        yield* sys.root.tell({ _tag: "CheckSize" });
+        yield* Effect.sleep("40 millis");
+
+        expect(setupCount).toBeGreaterThanOrEqual(2);
+        // restart 후 size = 0
+        expect(sizeAfterRestart).toEqual([0]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});

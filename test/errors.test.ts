@@ -6,6 +6,7 @@ import {
   IncarnationMismatch,
   MailboxFull,
   RestartLimitExceeded,
+  StashOverflow,
 } from "../src/errors.js";
 
 describe("Tagged errors", () => {
@@ -48,6 +49,14 @@ describe("Tagged errors", () => {
     expect(e.maxNrOfRetries).toBe(2);
     expect(e.windowMillis).toBe(1000);
     expect(e.attemptCount).toBe(3);
+  });
+
+  it("StashOverflow 는 path / capacity 보유 (M5 사이클 4, ADR-040)", () => {
+    const p = ActorPath.root("demo");
+    const e = new StashOverflow({ path: p, capacity: 100 });
+    expect(e._tag).toBe("StashOverflow");
+    expect(e.path).toBe(p);
+    expect(e.capacity).toBe(100);
   });
 
   it("Effect.fail 안에서 tagged 채널 실패로 흐름", async () => {

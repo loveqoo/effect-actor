@@ -7,6 +7,7 @@ import type {
   Strategy,
   SupervisorRule,
 } from "./supervision.js";
+import { makeStash, type Stash } from "./stash.js";
 import { makeTimers, type Timers } from "./timers.js";
 
 // Behavior<Msg> ADT — 액터의 _다음 동작_ 을 표현하는 불변 값.
@@ -133,6 +134,19 @@ export const Behaviors = {
         }),
         f,
       ),
+  }),
+
+  // M5 사이클 4 (ADR-040): Behaviors.withStash — setup 위 헬퍼 (사이클 3 패턴 동일).
+  // capacity bounded buffer + unstashAll(next) 가 stashed 메시지를 next behavior 에 직접 적용 (Akka 정통 순서).
+  // restart 시 setup 재실행 → 새 stash 인스턴스 → buffer 자동 비워짐.
+  // capacity 초과 시 stash() 가 StashOverflow fail (사용자 catch 또는 supervision).
+  withStash: <Msg>(
+    capacity: number,
+    f: (stash: Stash<Msg>) => BehaviorEffect<Msg>,
+  ): Behavior<Msg> => ({
+    _tag: "Setup",
+    init: (ctx) =>
+      Effect.flatMap(makeStash<Msg>({ capacity, ctx }), f),
   }),
 };
 

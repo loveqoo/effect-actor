@@ -50,3 +50,10 @@ export class RestartLimitExceeded extends Data.TaggedError(
   readonly windowMillis: number;
   readonly attemptCount: number;
 }> {}
+
+// M5 사이클 4 (ADR-040) — withStash buffer 용량 초과 시 stash() 가 fail.
+// 사용자가 catch 안 하면 step fail → supervision 분기 (Strategies.matchTag("StashOverflow") 등으로 제어).
+export class StashOverflow extends Data.TaggedError("StashOverflow")<{
+  readonly path: ActorPath;
+  readonly capacity: number;
+}> {}
