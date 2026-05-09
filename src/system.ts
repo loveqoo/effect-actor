@@ -282,6 +282,10 @@ const stopActor = <Msg>(
 
     // watchers 알림 (ADR-022) — 각 watcher 의 (path,uid) 가 정상이면 Terminated/Custom 발사.
     // ABA 안전: watcher.uid 가 현재 entry uid 와 다르면 새 incarnation, 옛 watch 무효.
+    // M4.1 fix (도그푸딩 #3 F1): shutdown cascade 도중 _죽어가는 watcher_ (status=stopped) 에게는
+    //   알림 skip. 그렇지 않으면 self-loop watcher (parent 가 child 를 watchWith 한 상태에서 sys.shutdown)
+    //   케이스에서 child 가 parent.mailbox 에 ChildGone enqueue → parent 의 messageLoop race wait 가
+    //   PostStop 깨우지 못해 hang. 의미상 자연 — 이미 죽고 있는 watcher 에게 알림 무의미.
     const watcherMap = yield* STM.commit(TRef.get(entry.watchers));
     const watcherPairs = Array.from(HashMap.entries(watcherMap));
     yield* Effect.forEach(
@@ -293,6 +297,11 @@ const stopActor = <Msg>(
           );
           if (Option.isNone(wFound)) return;
           if (wFound.value.uid !== watcherKey.uid) return;
+          // 죽어가는 watcher skip (F1 fix)
+          const watcherStatus = yield* STM.commit(
+            TRef.get(wFound.value.status),
+          );
+          if (watcherStatus === "stopped") return;
           if (watchMsg._tag === "Terminated") {
             yield* Queue.offer(
               wFound.value.cell.signalQueue,

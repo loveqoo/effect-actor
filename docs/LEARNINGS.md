@@ -362,3 +362,98 @@
 - [process] **upstream issue 박음**: https://github.com/Effect-TS/effect/issues/6225 (제목 _"TMap.remove and removeAll incorrectly clear entire bucket on hash collision"_). 본문: 인사 + 격리 reproducer (custom Hash 강제 충돌, 도메인 중립) + 현재 코드 + 제안 fix patch. ~96 줄, 우리 도메인 흔적 0, attribution 없이 (commit 패턴과 일관).
 - [code] `src/registry.ts` + `src/entry.ts` 의 우회 주석에 issue link + 복원 조건 (_"위 issue fix 가 release 되면 TMap 직접 사용으로 swap 가능"_) 명시. fix release 되면 `TRef<HashMap>` → `TMap` 한 줄 swap 으로 복원.
 - [process] OSS 환류 의의 — ADR-028 의 _라이브러리 정통_ 정신 그대로. 우리 우회는 _임시_, upstream fix 후 정통 복원이 자연스러움. PR 까지는 안 보냈지만 (C 갈래) reproducer + fix patch 까지 포함해 maintainer 부담 최소화.
+
+
+
+### 2026-05-09 — M4 도그푸딩 #3 (poly-phony 측, 5 사이클)
+
+#### 결과 요약
+
+- 5 사이클 / 106-107 테스트 / flake-free.
+- 핵심 약속 검증 9개 중 ✅ 8 / ⚠️ 1 / N/A 1 (matchTag — 도메인 시나리오 자연스레 미등장).
+- 사이클 5 발견 의제 3개 중 **의제 1, 2 노출 확정**. 의제 3 (PreRestart 재실패) 만 N/A.
+- _신규_ F1: `sys.shutdown` hang when `watchWith` registered — production 영향 가장 큼.
+
+#### Consumer 분석 (F3 단일 root cause 추정, 가설)
+
+> _세 finding 의 패턴이 일치: "종료 통로 일부 (PostStop hook + watcher 알림 + watcher subscription 정리) 가 일부 stop 경로에서 실행 안 됨". 외부 ctx.stop 만이 모든 통로를 지나감. 자발 Stopped, supervisor stop 강등 둘 다 일부 통로 skip. 이 skip 으로 인해 watcher subscription 이 dangling → sys.shutdown 의 drain 이 그것을 기다리며 hang._
+
+자발 Stopped (cycle 5A) / 외부 `ctx.stop` (cycle 5B) / supervisor stop 강등 (cycle 5C) 세 경로가 _다른 종료 통로_ 를 거침. cycle 5B 만 모든 통로 (PostStop + watcher 알림 + subscription 정리) 통과. 나머지 두 경로는 일부 skip.
+
+#### 라이브러리 측 평가 (ADR-024 / ADR-028 정신)
+
+Consumer 분석은 _가설_. M3.1 spawn race 의 consumer (_STM 경계 추측_) → 라이브러리 실측 (_latch + TMap 두 layer_) 정정 패턴과 동일하게, _라이브러리 측 실측_ 으로 검증 필요. 단 우리 사이클 5 발견 (3 의제) 과 정확히 일치 — 가설 정당성 ↑.
+
+F1 (shutdown hang) 은 우리 사이클 5 에서 발견 못 한 _신규_. consumer 시나리오가 라이브러리 격리 테스트 못 잡는 BUG surface 한 케이스 (M3.1 spawn race 와 같은 정신).
+
+#### 후속 사이클 결정 (M4.1)
+
+1. **사이클 1**: F1 진단 + fix. consumer reproducer 받아 system.test.ts 박고 _진짜 root cause_ 확정. 가설 (watchWith dangling subscription → drain 대기) 검증.
+2. **사이클 2**: 의제 1+2 (자발 stop / supervisor stop 강등 시 PostStop + watcher 통합). ADR-037 (_stop/cleanup 경로 통일_) 박을지 결정 — 사이클 1 의 진단으로 단일 root cause 확정되면 ADR-037 박음.
+3. **사이클 3**: poly-phony 측 재검증 → M4 _전체_ DoD 🟢.
+
+#### M5 로 미룸
+
+- 의제 3 (PreRestart 재실패 시 stop 강등) — restart-cleanup 정책 전체와 묶어 결정. M5 의 withLimit 와 함께.
+- matchTag 본격 — agent layer 가 supervise 적용 시 BackendError ADT (Transient/Permanent/ProtocolViolation) 매처 chain 으로.
+
+#### Consumer 추가 관찰 (참고)
+
+- _resume 의미_ — "Ref 쓰기는 살아남고 Effect.fail 만 흡수" 멘탈모델 명확. counter=3 깔끔히 입증.
+- _supervise + setup + receive_ 합성 자연스러움. 단 _setup 안에서 fail_ 시 어디로 가는지 미검증.
+- _watchWith_ 의 fire 조건 일관성 깨짐 — 의제 2 + F2 의 핵심 surface.
+- 4 핵심 약속 + 3 의제 모두 5 사이클 안에 surface — M3.1 도그푸딩 (cycle 5 cascade race) 과 비슷한 ROI.
+
+
+
+### 2026-05-09 — M4.1 사이클 1 (F1 진단 + fix)
+
+#### 진단 (라이브러리 측 실측)
+
+격리 reproducer (parent 가 child 를 watchWith → `sys.shutdown`) effect-actor 측에서 즉시 재현 — baseline 3ms / F1 1004ms timeout. trace log 로 hang 위치 정확히 확정:
+
+```
+[stop:user/kid] notify 1 watchers   ← child 의 watcher (root) 알림 = root.mailbox 에 ChildGone enqueue
+[stop:user] cascade done
+[stop:user] PostStop offered        ← root.signalQueue 에 PostStop offer
+[stop:user] awaiting own fiber       ← Fiber.await(rootFiber) HANG
+```
+
+**Root cause**: _shutdown cascade 도중 self-loop watcher 알림_. cascade 가 child stopActor → child watchers 알림 → root.mailbox 에 ChildGone enqueue. 그 후 root.PostStop offer. root messageLoop:
+- iter 1: ChildGone (mailbox) 처리 → handler noop
+- iter 2: `Effect.race(signalQueue.take, mailbox.take)` 진입 — 이미 enqueue 된 PostStop 잡지 못함 → hang
+
+핵심 trigger: _죽어가는 ancestor 에게 자식이 watcher 알림 발사_. 외부 watcher 면 hang 안 남.
+
+#### Consumer 가설 vs 실측
+
+Consumer 의 _drain 대기_ 가설은 _부분적으로 맞음_:
+- ✅ _drain 대기_ — root 가 mailbox ChildGone 처리 후 race wait 에서 PostStop 못 깨움
+- ⚠️ _trigger_ 는 더 구체적 — _shutdown cascade 안 self-loop watcher 알림_ 이 정확한 시점
+
+M3.1 spawn race 패턴 재현 (consumer = STM 추측, 실측 = 두 layer). 도그푸딩 흐름의 _학습 양식_ 일관.
+
+#### Fix (노선 A — 가장 작은 변화)
+
+`stopActor` 의 watchers 알림 forEach 안에 _watcher.status === "stopped" 면 skip_ 한 줄 추가. 의미상 자연 — 죽어가는 watcher 에게 알림 무의미.
+
+```ts
+const watcherStatus = yield* STM.commit(TRef.get(wFound.value.status));
+if (watcherStatus === "stopped") return;
+```
+
+회귀 0 — 외부 watcher (다른 sibling) 케이스는 정상 알림 (테스트로 검증).
+
+#### 회귀 테스트 (3개 추가, 총 157)
+
+- baseline (watchWith 없음 / shutdown < 500ms)
+- F1 (watchWith + shutdown 정상 < 500ms — fix 검증)
+- 외부 watcher 정상 알림 — fix 가 외부 케이스 회귀 X
+
+#### 부산물 — typecheck 회귀 fix
+
+진단 중 발견: 사이클 4 commit 이 typecheck 통과 못 한 채 박힘 (`Strategies.matchInstance` 의 `ReadonlyArray<unknown>` 가 builtin Error 의 `(message?: string, options?)` 시그너처와 호환 X). runtime 은 정상이라 test 통과로 미발견. `any[]` 로 lenient — 별도 commit 분리 (`fix: Strategies.matchInstance 시그너처 lenient`).
+
+#### 다음 (사이클 2)
+
+의제 1, 2 — 자발 stop / supervisor stop 강등 시 PostStop + watcher 알림 통합. F1 fix 와 _독립_ — 다른 root cause (_종료 통로 자체가 호출 안 됨_ vs F1 의 _호출 후 wake-up 실패_). ADR-037 박을지 사이클 2 진단 후 결정.

@@ -1042,3 +1042,115 @@ describe("ctx.stop — graceful cascade (M3 사이클 1, ADR-031)", () => {
       }),
     ));
 });
+
+describe("M4.1 — sys.shutdown + watchWith self-loop (도그푸딩 #3 F1 회귀)", () => {
+  it("baseline — watchWith 없이 spawn 만 → shutdown 빠르게 정상", () =>
+    run(
+      Effect.gen(function* () {
+        const child = Behaviors.empty<unknown>();
+        const parent = Behaviors.setup<{ readonly _tag: "Ping" }>((ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.spawn(child, "kid");
+            return Behaviors.receiveMessage<{ readonly _tag: "Ping" }>(() =>
+              Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+        const sys = yield* ActorSystem.create<{ readonly _tag: "Ping" }>(
+          parent,
+          "baseline",
+        );
+        yield* Effect.sleep("20 millis");
+        const start = Date.now();
+        yield* sys.shutdown.pipe(
+          Effect.timeoutFail({
+            duration: "1 second",
+            onTimeout: () => new Error("baseline shutdown timeout"),
+          }),
+        );
+        expect(Date.now() - start).toBeLessThan(500);
+      }),
+    ));
+
+  it("F1 — parent 가 child 를 watchWith 한 상태에서 sys.shutdown 정상 종료", () =>
+    run(
+      Effect.gen(function* () {
+        type ParentMsg =
+          | { readonly _tag: "Ping" }
+          | { readonly _tag: "ChildGone" };
+        const child = Behaviors.empty<unknown>();
+        const parent = Behaviors.setup<ParentMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(child, "kid");
+            yield* ctx.watchWith(c, { _tag: "ChildGone" } as ParentMsg);
+            return Behaviors.receiveMessage<ParentMsg>(() =>
+              Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+        const sys = yield* ActorSystem.create<ParentMsg>(parent, "f1");
+        yield* Effect.sleep("20 millis");
+        const start = Date.now();
+        yield* sys.shutdown.pipe(
+          Effect.timeoutFail({
+            duration: "1 second",
+            onTimeout: () => new Error("F1 still hangs — fix regressed"),
+          }),
+        );
+        // baseline 과 비슷한 시간대 — race wait 깨우지 못해 hang 안 함
+        expect(Date.now() - start).toBeLessThan(500);
+      }),
+    ));
+
+  it("외부 watcher (다른 sibling) 는 정상 알림 받음 — fix 가 외부 케이스 회귀 X", () =>
+    run(
+      Effect.gen(function* () {
+        type WatcherMsg =
+          | { readonly _tag: "Init"; readonly target: ActorRef<unknown> }
+          | { readonly _tag: "TargetGone" };
+
+        const events: Array<string> = [];
+        const watcher = Behaviors.setup<WatcherMsg>((ctx) =>
+          Effect.succeed(
+            Behaviors.receiveMessage<WatcherMsg>((m) => {
+              if (m._tag === "Init") {
+                return ctx
+                  .watchWith(m.target, {
+                    _tag: "TargetGone",
+                  } as WatcherMsg)
+                  .pipe(Effect.as(Behaviors.same()));
+              }
+              events.push("target-gone");
+              return Effect.succeed(Behaviors.same());
+            }),
+          ),
+        );
+
+        const target = Behaviors.empty<unknown>();
+
+        type RootMsg = { readonly _tag: "Setup" };
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const w = yield* ctx.spawn(watcher, "watcher");
+            const t = yield* ctx.spawn(target, "target");
+            yield* ctx.system.tell(w, {
+              _tag: "Init",
+              target: t as ActorRef<unknown>,
+            });
+            yield* Effect.sleep("20 millis");
+            // ctx.stop(t) — watcher 살아있는 상태에서 target stop
+            yield* ctx.stop(t);
+            yield* Effect.sleep("30 millis");
+            return Behaviors.same();
+          }),
+        );
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("100 millis");
+        yield* sys.shutdown;
+
+        // watcher 가 target 의 죽음 알림 정상 수신
+        expect(events).toContain("target-gone");
+      }),
+    ));
+});
