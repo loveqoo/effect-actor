@@ -9,26 +9,32 @@
     "node": ">=20"
   },
   "packageManager": "pnpm@11.0.8",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "example": "tsx",
-    "format": "prettier --write \"{src,examples,test}/**/*.{ts,tsx,md}\""
+    "format": "prettier --write \"{src,examples,test}/**/*.{ts,tsx,md}\"",
+    "clean": "rm -rf dist",
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "prepublishOnly": "pnpm build && pnpm test"
   },
   "peerDependencies": {
     "effect": "^3.10.0"

@@ -797,7 +797,7 @@ ADR-028 잣대 적용:
 ---
 
 ## ADR-032: 패키징 — source-direct export (도그푸딩 단계 한정)
-- 상태: accepted (도그푸딩 #2 사이클 0 검증 완료)
+- 상태: superseded by ADR-042 (2026-05-09, M∞ 사이클 c — 도그푸딩 단계 끝, 배포용 tsc 빌드)
 - 일자: 2026-05-09
 - 출처: M2 끝 도그푸딩 #1 입력 #5 → 도그푸딩 진입 자체를 막던 갭 해소
 - 검증: 2026-05-09 도그푸딩 #2 사이클 0 — poly-phony vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader / build step 없이 30줄 probe 통과 (LEARNINGS).
@@ -1515,6 +1515,107 @@ M5 _전체_ DoD 🟢 (도그푸딩 #4 통과). 이제 0.1.0 첫 npm 배포 직�
 - README 첫 줄에 _0.x 정책_ 한 줄 명시 (M∞ 사이클 (b) — 영어 README + 한국어 README)
 - CHANGELOG.md 첫 entry 작성 — 0.1.0 (M∞ 사이클 (e) — 첫 배포 직전)
 - conventional commits → release-please 자동화 — _외부 contributor_ 생기면 별도 ADR
+
+---
+
+## ADR-042: 빌드 도구 = tsc (vs tsup) + ESM 만 + dist/ 출력 (M∞ 사이클 c)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M∞ 진입 — ADR-027 의 _빌드 도구 미정_ 후속 + ADR-032 의 _도그푸딩 단계 한정_ 후속. M5 도그푸딩 #4 통과 후 npm 배포 직전.
+
+### 맥락
+ADR-027 에서 _빌드 도구는 M∞ 직전 결정_ 명시. 도그푸딩 단계는 ADR-032 의 source-direct export 로 우회. 이제 도그푸딩 #4 통과 → 배포 직전 → tsc / tsup / unbuild / rollup 중 결정.
+
+후보:
+- **tsc** (TypeScript compiler 직접) — 표준, 의존성 0, ESM .js + .d.ts 출력
+- **tsup** (esbuild 기반) — 빠름, ESM/CJS 듀얼 쉬움, esbuild 의존
+- **unbuild** (Vite 생태계) — rollup 기반, .d.ts 자동
+- **rollup + plugin** — 가장 유연, 설정 복잡
+
+선택 기준:
+- 단순함 (설정 최소, 의존성 최소)
+- 라이브러리 _확실성_ 우선 (빌드 시간보다 _출력 정확성_)
+- ESM 만 (ADR-027 의 ESM 명시 그대로)
+- source map + .d.ts.map 필수 (사용자 디버깅)
+
+### 결정
+
+**A. tsc 채택. tsup 등 X.**
+
+이유:
+- (+) 의존성 0 — TypeScript 자체 (이미 devDep). 새 도구 추가 없음.
+- (+) EffectTS 본체 + @effect/* 모든 패키지가 tsc 사용 — 생태계 정통.
+- (+) _ESM 만_ 출력이 단순 (CJS dual 안 만듦).
+- (+) `.d.ts.map` 자동 — 사용자가 IDE 에서 _go to definition_ 시 우리 src/.ts 까지 추적 가능.
+- (-) tsup 의 _빠른 빌드_ (~10x) 포기. 라이브러리 빌드는 _publish 시 한 번_ 이라 무관.
+- (-) tsup 의 _zero-config dual ESM/CJS_ 포기. 우리는 _ESM 만_ 정책이라 의미 없음.
+
+**B. `tsconfig.build.json` 별도 파일.**
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "moduleResolution": "Node16",
+    "module": "Node16"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts", "node_modules", "dist", "coverage"]
+}
+```
+
+- 기존 `tsconfig.json` 은 dev 용 (`noEmit: true`, examples/test 포함, `module: ESNext` + `moduleResolution: Bundler`).
+- 빌드용은 `module: Node16` — Node.js 의 ESM 해석 정확. src/ 의 import 가 이미 `.js` extension 명시 (ESM 호환) 라 그대로 통과.
+
+**C. `package.json` exports / files / scripts 갱신.**
+
+```json
+{
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "prepublishOnly": "pnpm build && pnpm test"
+  }
+}
+```
+
+- `exports` types-first 순서 (TS 5+ 권장).
+- `files` = dist + README + LICENSE + CHANGELOG (ADR-041 형식). src/ 도 _포함 안 함_ (사용자 dist/.d.ts.map 으로 src 추적 — 별도 publish X).
+- `publishConfig.access: "public"` — restricted (도그푸딩 X) → public.
+- `prepublishOnly` = build + test 자동. publish 실수 안전망.
+
+**D. ADR-032 supersede.**
+
+ADR-032 의 source-direct export 는 _도그푸딩 한정_ 명시 — 도그푸딩 끝났으니 supersede. ADR-032 자체는 _역사 보존_ (ADR 갱신 규칙).
+
+### 결과
+- (+) 새 의존성 0 — tsc 가 이미 있음. devDep 추가 없음.
+- (+) EffectTS 정통 — 사용자/유지보수 학습 비용 0.
+- (+) `.d.ts.map` 으로 사용자 IDE 가 우리 src/ 까지 _go to definition_ 추적 — 라이브러리 디버깅 친화.
+- (+) `prepublishOnly` 가 build + test 자동 — _깨진 빌드 publish_ 방지.
+- (-) 빌드 시간 ~수초 (tsup 의 ~수백 ms 대비). publish 시 한 번이라 무관.
+- (-) CJS 사용자 _불가_ — ESM 전용 명시 (README 첫 줄 권장).
+
+### 후속 (M∞ 다음 사이클들)
+- 영어 README 의 _ESM only / Node 20+_ 명시 (M∞ 사이클 b)
+- `pnpm pack` dry-run 검증 — 42KB tarball, dist/ + LICENSE + package.json + README 만 (확인 완료 2026-05-09)
+- 0.1.0 첫 publish (M∞ 사이클 e) — `pnpm publish` 가 prepublishOnly 자동 호출
 
 ---
 

@@ -658,3 +658,15 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [decision] **CHANGELOG = Keep a Changelog 수기.** 자동화 (release-please / changesets) 는 _PR 흐름_ 본격화 후. 현재 commit 메시지가 이미 conventional 패턴 (`feat:`, `fix:`, `docs:`) — 자동화 도입 시 부드러움.
 - [decision] **Deprecation = 0.x 즉시 제거 가능 (`@deprecated` 1번 정도) / 1.0+ = 한 minor warning 후 제거.** 0.x 의 _철학 안에서 다듬기_ 자유 vs 1.0+ 의 _안정 약속_ 차이.
 - [insight] **F6 (DX SCORECARD) 결정 = M∞ 사이클 a 로 닫힘.** plan-devex-review 의 _배포 직전 ADR_ 약속 그대로. ADR-041 박은 후 README 의 _0.x 정책_ 명시 (사이클 b) → CHANGELOG.md 첫 entry (사이클 e 직전) 가 자연 순서.
+
+
+
+### 2026-05-09 — M∞ 사이클 (c): 빌드 도구 = tsc (ADR-042 + ADR-032 supersede)
+
+- [decision] **tsc 채택** (vs tsup/unbuild/rollup). 의존성 0, EffectTS 정통, ESM 만 출력 단순. 라이브러리 빌드는 _빌드 시간_ (tsup 10x) 보다 _확실성_ 우선.
+- [decision] **`tsconfig.build.json` 별도** (`module: Node16`, `outDir: dist`, `rootDir: src`, `declaration/Map + sourceMap`). 기존 `tsconfig.json` 은 dev 용 (Bundler resolution + noEmit) 그대로.
+- [decision] **package.json — exports types-first / files=dist + LICENSE + README + CHANGELOG / publishConfig public / prepublishOnly = build+test.** `prepublishOnly` 가 _깨진 빌드 publish_ 방지 안전망.
+- [decision] **ADR-032 supersede.** source-direct export 는 _도그푸딩 단계 한정_ 명시 — 도그푸딩 #4 통과 = 단계 끝. ADR-032 자체는 _역사 보존_.
+- [verify] `pnpm build` → 64 파일 (16 src × {.js, .js.map, .d.ts, .d.ts.map}). `pnpm pack --dry-run` → 42KB tarball, dist/ + LICENSE + package.json + README 만. typecheck + 201 테스트 그대로 통과.
+- [insight] **`.d.ts.map` 의 가치.** 사용자 IDE 의 _go to definition_ 시 우리 src/ .ts 까지 추적 가능 — 라이브러리 디버깅 친화. tsc 의 `declarationMap: true` 한 줄. tsup 도 가능하나 _별도 설정_, tsc 는 _자연_.
+- [process] _두 tsconfig_ 패턴 (dev + build) 이 EffectTS 생태계 정통 (Effect 본체도 같음). dev 는 빠른 피드백 (Bundler resolution + noEmit), build 는 정확성 (Node16 + emit). 사용자 학습 비용 작음.
