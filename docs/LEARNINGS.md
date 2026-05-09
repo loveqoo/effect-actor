@@ -750,3 +750,14 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [verify] 5회 flake-free, 210 → 215 테스트.
 - [insight] **STM 트랜잭션 _크기_ 의 trade-off.** 사이클 2 는 spawn 의 STM tx 를 작게 (_check + register_ 만), 사이클 4 는 onSelfTermination 의 STM tx 를 크게 (_watchers + status + unregister + parent_ 한 번에). _atomic 보장_ 이 race-free 의 핵심. 너무 크면 contention 위험인데 single-actor write 라 OK.
 - [insight] **순서 (ordering) bug 의 패턴.** R1 의 본질은 _registry unregister 가 알림 발사 후_ 였던 것. atomic 으로 묶었지만 _순서_ 도 옳아야 함. STM 트랜잭션 안 ordering 은 deterministic 이지만 _STM commit 후 Effect.forEach 발사_ 사이의 ordering 도 신경 써야. 첫 시도 (status + watchers 만 atomic) 에서 fail 한 회귀 테스트가 _registry unregister 가 늦음_ 잡아냄 — TDD 의 가치.
+
+
+
+### 2026-05-10 — M∞.1 사이클 5: codex re-re-review GATE: PASS + 0.1.0 publish
+
+- [verify] codex re-re-review (`codex review --commit dbae832`): _"I did not find any blocking correctness issues in this commit. The status split, atomic termination cleanup, and spawn failure cleanup all look internally consistent with the surrounding lifecycle logic."_ — 사이클 4 fix 가 깨끗.
+- [milestone] **`@loveqoo/effect-actor@0.1.0` npm publish (2026-05-10).** First public release. M0-M5 + M∞.1 환류 (ADR-043/044/045) 통합. 215 테스트, 5회 flake-free, codex 3 라운드 GATE PASS.
+- [milestone] git tag `v0.1.0` + 32 커밋 origin push — GitHub repo `loveqoo/effect-actor` 도 첫 push (initial commit 1 → 33 커밋).
+- [process] **npm 2FA = WebAuthn/passkey (TOTP 옵션 제한).** macOS Touch ID 가 platform authenticator 로 동작 — 물리 키 없이 진행 가능. 등록 시 _이름표_ 만 입력 ("MacBook Pro" 등) → 기기 자체가 인증.
+- [insight] **3 라운드 review 패턴의 가치.** 1라운드 (사이클 f, codex 4 finding) → 2라운드 (사이클 3, R1+R2 회귀 발견) → 3라운드 (사이클 5, GATE PASS). _fix 가 새 finding 만든다_ 가설 검증 — 회귀 fix 후 _다시_ review 가 정통. 배포 전 _수렴_ 까지가 외부 검증의 진짜 사이클.
+- [insight] **0.x = 안정 약속 _없음_ 의 자유.** ADR-041 의 0.x 정책 덕에 ChildNameTaken 시그너처 변경 (사이클 2) + status 3단계 추가 (사이클 4) 모두 _배포 전_ 에 자유롭게. 1.0+ 면 _한 minor warning_ 후 제거. 0.x 의 _느슨함_ 이 학습 비용 낮춤.
