@@ -18,7 +18,7 @@
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
 | M5. 고급 기능 | 🟢 완료 | Backoff / withLimit / Stash / Timer + examples 06~08 + Effect 밖 throw 안전망. ADR-037~040. 201 테스트. **도그푸딩 #4 통과 — finding 0, 회귀 0, 5×3=15회 flake-free.** |
-| M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
+| M∞. 출시 | 🟡 진행 중 | npm 배포 직전 결정거리. (a) semver ✅ ADR-041 / (b) 영어 README+CHANGELOG / (c) 빌드 도구 / (d) TMap PR / (e) 0.1.0 배포 |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
 
@@ -282,7 +282,7 @@
 - npm 패키지 이름 결정 (`@loveqoo/effect-actor` 후보)
 - 첫 배포 직전 `/devex-review`, `/codex review`, `/health` 통과
 - README / CHANGELOG / docs 영어판 (비공식적으로는 한국어 docs 그대로, 영어 README 별도)
-- **semver 정책 확정** (현재 미정 — F6 결정에 따라 M∞ 직전에 ADR 로 정함. 후보: `0.x = minor 가 breaking, patch 는 fix-only / 1.0+ = SemVer`)
+- **semver 정책** — ✅ ADR-041 박음 (M∞ 사이클 a). 0.x = minor breaking + patch fix, 1.0+ = SemVer 표준 + 한 minor warning deprecation. 1.0 진입 조건 = 배포 후 1주 안정 + 외부 issue 1라운드.
 - 영어 README 작성 (한국어 docs/ 그대로)
 - CONTRIBUTING.md / ISSUE_TEMPLATE / PR template 추가
 
@@ -397,7 +397,7 @@ _plan-devex-review (2026-05-08):_
 - F3: M1부터 examples/ 동작 (✅ ADR-011)
 - F4: 디버그 모드 placeholder만 (✅ ARCHITECTURE.md §4.4, ADR-013)
 - F5: 에러 종류 ARCHITECTURE에, 어휘 사이클별 (✅ ADR-012)
-- F6: semver M∞ 직전 (✅ M∞ 노트)
+- F6: semver M∞ 직전 → ✅ ADR-041 (2026-05-09, M∞ 사이클 a)
 
 _plan-eng-review round 1 (2026-05-09):_
 - OV-1, 2, 3, 4, 5, 8, 9, 10 → ADR-016~023

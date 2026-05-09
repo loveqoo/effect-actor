@@ -648,3 +648,13 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
   - (c) 빌드 도구 결정 (ADR-027 후속) + setup-deploy
   - (d) Effect TMap upstream PR (#6225 follow-up, 우회 패치 본체로 보낼지)
   - (e) 0.1.0 배포 자체
+
+
+
+### 2026-05-09 — M∞ 사이클 (a): semver 정책 (ADR-041)
+
+- [decision] **0.x = minor breaking + patch fix/internal** (Akka / Cats Effect 정통). npm `^0.x.y` 가 patch only 자동 보호 — _minor=breaking_ 의미가 _기술적_ 으로 강제됨. SemVer 표준과 다른 부분은 README 첫 줄에 명시 (M∞ 사이클 b).
+- [decision] **1.0 진입 = 배포 후 _안정 약속_** — 코드 끝 ≠ 1.0. 체크리스트: (1) 배포 후 ~1주 안정, (2) 외부 사용자 1명+ 사용, (3) 첫 issue 1라운드 처리, (4) Cluster/Persistence 등 비목표 _명시 결정_, (5) 영어 docs 갱신. ADR-024 의 _도그푸딩 정신_ 을 _배포 후_ 까지 확장.
+- [decision] **CHANGELOG = Keep a Changelog 수기.** 자동화 (release-please / changesets) 는 _PR 흐름_ 본격화 후. 현재 commit 메시지가 이미 conventional 패턴 (`feat:`, `fix:`, `docs:`) — 자동화 도입 시 부드러움.
+- [decision] **Deprecation = 0.x 즉시 제거 가능 (`@deprecated` 1번 정도) / 1.0+ = 한 minor warning 후 제거.** 0.x 의 _철학 안에서 다듬기_ 자유 vs 1.0+ 의 _안정 약속_ 차이.
+- [insight] **F6 (DX SCORECARD) 결정 = M∞ 사이클 a 로 닫힘.** plan-devex-review 의 _배포 직전 ADR_ 약속 그대로. ADR-041 박은 후 README 의 _0.x 정책_ 명시 (사이클 b) → CHANGELOG.md 첫 entry (사이클 e 직전) 가 자연 순서.

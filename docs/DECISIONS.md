@@ -1412,6 +1412,112 @@ interpretStep 가 fail/die 면 unstashAll 의 generator 가 그대로 propagate.
 
 ---
 
+## ADR-041: semver 정책 + 1.0 진입 조건 + CHANGELOG 형식 + deprecation (M∞ 직전)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M∞ 진입 — DX SCORECARD F6 의 _semver M∞ 직전 결정_ + ADR-006 의 _0.x 알파_ 명시 후속 + 도그푸딩 #4 통과 후 npm 배포 직전
+
+### 맥락
+M5 _전체_ DoD 🟢 (도그푸딩 #4 통과). 이제 0.1.0 첫 npm 배포 직전. 배포 후 _사용자 의존성 계약_ 이 시작되므로 _semver 정책_ 을 미리 박아둬야:
+
+1. **0.x 단계의 의미** — SemVer 표준 (`major.minor.patch`) 은 _major 가 breaking_. 그러나 0.x 는 _초기 알파_ 단계라 minor 도 breaking 가능. Akka / Cats Effect / 많은 EffectTS 생태계가 _0.x 에서 minor=breaking_ 약정.
+2. **1.0 진입 시점** — _언제_ stable? Cluster/Persistence 까지? 도그푸딩 추가 통과? 외부 사용자 issue 라운드 후?
+3. **CHANGELOG 형식** — Keep a Changelog 형식 _수기_ vs conventional commits → release-please 자동화.
+4. **Deprecation 정책** — 0.x 단계는 _즉시 제거_ 가능 vs 한 minor 동안 warning.
+
+### 결정
+
+**A. 0.x 정책 — minor = breaking, patch = fix/internal.**
+
+```
+0.x.y
+├─ y (patch): bug fix, internal refactor, doc change, deprecation 추가 (제거 X)
+└─ x (minor): breaking change, 새 기능, 사용자 표면 ADT/시그너처 변경
+```
+
+이유:
+- (+) Akka / Cats Effect / 많은 EffectTS 라이브러리 정통 — 사용자 학습 비용 0.
+- (+) npm 의 `^0.x.y` 는 _patch only_ 자동 — 사용자가 `^0.1.0` 으로 의존하면 _자동 minor 업그레이드 X_. _minor=breaking_ 의 자연 보호.
+- (+) 0.x = _알파_ (ADR-006) 정신 그대로 — 사용자가 _주의_ 하고 의존.
+- (-) SemVer 표준과 다름 — 사용자가 _major=breaking_ 가정 시 혼란. README 첫 줄 _주의_ 명시.
+
+**B. 1.0 진입 조건 — _배포 환경 안정 + 외부 issue 라운드_ 후.**
+
+명시적 체크리스트:
+1. npm 배포 후 _최소 1주_ 안정 (poly-phony 외 _다른 사용자 1명_ 이상 사용)
+2. 첫 외부 issue 1 라운드 처리 (받음 → 분석 → fix 또는 _안 한다_ 결정)
+3. ADR-006 의 _0.x 비목표_ (Cluster, Persistence 등) 모두 _명시 결정_ — 1.0 에서도 안 하기로 한다 / 1.x 후속 한다 / X
+4. 영어 README + CHANGELOG + CONTRIBUTING 모두 _배포 후 갱신_ 된 상태
+
+→ 1.0 = _다음 단계_ 가 아닌 _안정 약속_. 빨라도 _배포 후 1~2개월_, 도그푸딩 통과 != 1.0 진입.
+
+**C. CHANGELOG 형식 — Keep a Changelog 수기 (자동화 미루기).**
+
+```markdown
+# CHANGELOG
+
+## [0.2.0] - YYYY-MM-DD
+
+### Added
+- ...
+
+### Changed
+- ...
+
+### Removed
+- ...
+
+### Fixed
+- ...
+
+## [0.1.0] - 2026-05-09
+
+### Added
+- 첫 배포 (M0~M5 전체)
+- ...
+```
+
+이유:
+- (+) 사용자가 _읽기_ 좋음 (자동 생성 changelog 는 _기계 친화_ 인 경우 많음).
+- (+) 현재 commit 메시지가 이미 conventional 패턴 (`feat: ...`, `fix: ...`, `docs: ...`) — 자동화 가능 시점에 도입 쉬움.
+- (-) 수기 비용 — minor 마다 5~10분. 0.x 단계 minor 빈도 낮으면 부담 작음.
+
+자동화 (release-please / changesets) 는 _PR 흐름_ 본격화 후 (외부 contributor + multiple maintainer) 도입 — 별도 ADR.
+
+**D. Deprecation 정책 — 0.x 즉시 제거, 1.0+ 한 minor 동안 warning.**
+
+```
+0.x:
+  - minor 에서 _바로_ 제거 가능 (알파 정신)
+  - CHANGELOG 의 ## Removed 절에 명시
+  - 가능하면 patch 에서 _deprecation comment_ (JSDoc `@deprecated`) 1번 미리
+
+1.0+:
+  - 한 minor 동안 _deprecation warning_ (JSDoc + console.warn)
+  - 그 다음 minor 에서 제거
+  - 예: 1.2 에서 deprecate → 1.3 에서 제거
+```
+
+이유:
+- (+) 0.x 는 _철학 안에서_ (ADR-028) 표면 다듬기 자유 — deprecation 부담 작음.
+- (+) 1.0+ 는 _안정 약속_ — 한 minor warning 이 _계약_ 의 일부.
+- (-) 0.x 의 _즉시 제거_ 가 사용자 입장에서 부담 — 그러나 `^0.x` 자동 보호로 완화.
+
+### 결과
+- (+) Akka / Cats Effect 정통 — 사용자 학습 비용 0.
+- (+) npm 의 `^0.x.y` 자동 보호 — _minor=breaking_ 정책의 의미가 _기술적으로_ 강제됨.
+- (+) 1.0 진입이 _배포 후 안정 약속_ — 코드 끝 ≠ 1.0. ADR-024 의 _도그푸딩 정신_ 그대로 _배포 후_ 까지 확장.
+- (+) CHANGELOG 수기 — _읽기_ 친화 + 0.x 빈도 낮음 = 부담 작음.
+- (-) SemVer 표준과 다른 0.x 정책 — README 명시 필요.
+- (-) 1.0 진입 조건이 _주관적_ ("안정") — 그러나 체크리스트 박혀 있어 자의 X.
+
+### 후속 (M∞ 다음 사이클들)
+- README 첫 줄에 _0.x 정책_ 한 줄 명시 (M∞ 사이클 (b) — 영어 README + 한국어 README)
+- CHANGELOG.md 첫 entry 작성 — 0.1.0 (M∞ 사이클 (e) — 첫 배포 직전)
+- conventional commits → release-please 자동화 — _외부 contributor_ 생기면 별도 ADR
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.
