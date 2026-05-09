@@ -13,8 +13,11 @@
 | #2 | M3 끝 | 2026-05-09 | 5 사이클 / 9 테스트 / 1 BUG (spawn race) → M3.1 환류 |
 | #3 | M4 끝 | 2026-05-09 | 5 사이클 / 4 finding → M4.1 환류 (cleanup 통일) |
 | #4 | **M5 끝** | 2026-05-09 | **통과** — 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. 5 cliff 모두 안정. M5 _전체_ DoD 🟢. M∞ 진입 가능. |
+| #5 | **0.1.0 배포 직후** | 2026-05-10 | **packaging 검증** — source-direct (#4) 가 아닌 _진짜 npm install + dist/_. exports / .d.ts.map / IDE / ESM / peer dep. 진행 중. |
 
 #1~#3 은 _가벼운 도그푸딩_ (~1주 한정). **#4 부터 _본격_** — poly-phony 가 effect-actor 위에 _진짜 agent_ 를 만들면서 _모든 표면_ (M1~M5) 사용. 환류 사이클 (M5.1+) 가능성 열어둠.
+
+**#5 는 _packaging 검증_ 중심** — 기능은 #4 가 검증. #5 의 초점은 _배포한 코드_ 가 _진짜 npm 환경_ 에서 동작하는지. 가벼움 (1-2 사이클).
 
 ---
 
@@ -247,6 +250,99 @@ ADR-024 의 _M5 끝_ 본격 도그푸딩 시점 = npm 배포 직전 마지막 �
 - M5.1 환류 사이클 모두 closed 후 → M∞ 진입 (semver 정책 결정 + 영어 README + CHANGELOG + setup-deploy)
 - 0.1.0 첫 배포 — _도그푸딩 통과한 표면_ 그대로
 - 도그푸딩 #5+ 는 _배포 후_ 사용자 측 issue 입력 (GitHub) 으로 넘어감
+
+---
+
+## 도그푸딩 #5 — _packaging 검증_ 가이드
+
+### 0. 목적
+
+도그푸딩 #4 까지는 _source-direct_ (poly-phony 가 effect-actor 의 src/ 를 직접 import). #5 는 **`npm install @loveqoo/effect-actor@0.1.0` → `dist/` 번들 사용**. 검증 초점:
+
+1. **설치 path** — `pnpm add @loveqoo/effect-actor` 정상.
+2. **exports 해상도** — `import { ActorSystem, Behaviors, Strategies, ... }` 모두 풀림.
+3. **타입** — IDE 에서 `ActorRef<Msg>`, `Behaviors.receive`, `Strategies.matchTag` 등 자동완성 + 시그너처 hover.
+4. **`.d.ts.map` 의 `go to definition`** — 우리 `src/` (또는 `dist/*.d.ts`) 까지 추적.
+5. **ESM 호환성** — poly-phony 의 module 환경 (`tsconfig.json` 의 `module: NodeNext` 등) 과 충돌 없는지.
+6. **peer dep `effect@^3.10.0`** — poly-phony 의 effect 버전과 충돌 없는지.
+
+기능 검증 _아님_ — 기능은 도그푸딩 #4 통과. _포장지 검증_.
+
+### 1. 환경 준비
+
+```bash
+cd ~/Repository/github/loveqoo/poly-phony
+
+# (a) 기존 source-direct dependency 제거 (가능한 경우 — 도그푸딩 #4 셋업)
+# package.json 의 "@loveqoo/effect-actor": "file:../effect-actor" 또는 비슷한 항목 제거.
+
+# (b) 진짜 npm 에서 install
+pnpm add @loveqoo/effect-actor@0.1.0
+
+# (c) 설치 결과 확인
+ls node_modules/@loveqoo/effect-actor/dist/ | head -10
+# 기대: index.{js,d.ts,d.ts.map,js.map} + 16개 module 파일
+cat node_modules/@loveqoo/effect-actor/package.json | head -20
+# version 0.1.0, exports 정상
+```
+
+### 2. 시나리오 — 2 사이클 분할 권장
+
+#### 사이클 1: smoke install + 한 example 동작
+
+도그푸딩 #4 의 _가장 간단한 표면_ 한 줄 (예: `examples/01-counter.ts` 의 spawn/tell/receive) 을 poly-phony 안 _아무 파일_ 로 옮겨 실행.
+
+검증 항목:
+- `import { ActorSystem, Behaviors } from "@loveqoo/effect-actor"` 풀림
+- TypeScript compile 통과
+- `pnpm dev` (또는 `tsx your-smoke.ts`) 정상 실행 → expected 출력
+- 콘솔에 _no warnings_ (ESM/CJS interop 경고 없음)
+
+발견 시 보고:
+- import resolve 실패 → npm 설치 손상 또는 exports map 잘못
+- tsc 에러 → tsconfig 환경 충돌 또는 .d.ts 손상
+- 런타임 에러 → dist/ 빌드 손상 (tsc 결과)
+
+#### 사이클 2: IDE 친화도 + 도그푸딩 #4 _도메인_ 한 사이클 재실행
+
+VS Code (또는 본인 IDE) 에서:
+- `ActorRef<Msg>` 의 `Msg` 자동 추론 보임?
+- `Behaviors.supervise(b).onFailure(...)` 의 `Strategies` 자동완성 — `restart`, `restartWithBackoff`, `withLimit` 등 모두 보임?
+- `ChildNameTaken` 의 `Effect.catchTag("ChildNameTaken", ...)` 자동완성 + 타입 좁힘?
+- `ctx.spawn` 의 _hover_ — 시그너처 + (있다면) JSDoc?
+- _go to definition_ — `ActorSystem.create` 누르면 dist/system.d.ts 로? `.d.ts.map` 있으면 우리 src/system.ts 로?
+
+**도메인 한 사이클** — 도그푸딩 #4 의 사이클 한 개 (예: watchTerminated + 재spawn — 우리 ADR-045 의 핵심 시나리오) 를 _진짜 npm 환경_ 에서 다시. 한 번. _packaging 손상_ 으로 _기능_ 도 깨졌는지 검증.
+
+### 3. 결과 형식
+
+도그푸딩 #4 와 같은 형식. 사이클 별 _발견_ + _재현 코드_. **최소 출력:**
+
+```
+## 도그푸딩 #5 — packaging 검증
+
+### 사이클 1 — smoke install + 1 example
+- pnpm add @loveqoo/effect-actor@0.1.0 → 성공/실패 (메시지 첨부)
+- import resolve → OK / ERR
+- tsc → OK / ERR (메시지)
+- 실행 → expected 출력 / 실제 출력
+- finding: 0 / N (각 finding 형식: 가설 + 재현 코드)
+
+### 사이클 2 — IDE + 도메인 한 사이클
+- 자동완성 / hover / go-to-definition 각 OK / ERR
+- 도메인 사이클 (watchTerminated + 재spawn) → OK / ERR
+- finding: 0 / N
+```
+
+### 4. 결과 도착 시 후속
+
+- finding 0 → **0.1.0 packaging DoD 🟢** → 도그푸딩 _배포 후_ 모드 (외부 issue 라운드 대기)
+- finding 1+ → 분류:
+  - **packaging cliff** (exports / d.ts / ESM / peer dep) → 0.1.1 patch (ADR-041 의 _patch = bug fix_)
+  - **시그너처 cliff** (시그너처 누락 / 시그너처 잘못) → 0.1.1 patch 또는 0.2.0 minor (breaking 여부)
+  - **문서 cliff** (README / CHANGELOG 의 사실 오류) → 0.1.1 docs patch 
+
+cliff 발견 = _배포 직후 회귀_ 라 _가장 빠른 patch_ 우선.
 
 ---
 
