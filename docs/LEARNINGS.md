@@ -274,3 +274,9 @@
 - [process] Effect 본체 버그라 upstream 보고 candidate. 단 검증/PR 일정 별도 → 우선 우회 fix 로 unblock.
 
 
+
+### 2026-05-09 — M3 완료 명시
+
+- [process] **M3 마일스톤 _전체_ DoD 확정.** 사이클 6 + M3 끝 도그푸딩 #2 (5 사이클) + M3.1 사이클 1 (spawn race fix 두 layer + consumer 측 9ms / 5회 flake-free 재검증) 모두 충족. PLAN.md M3 상태 표기 🟢 완료 / M3.1 도 🟢 완료. 누적 118 테스트.
+- [process] M3 의 _진짜 완료_ 는 코드 작성 끝 (사이클 6) 이 아니라 _도그푸딩 환류 fix 까지 통과한 시점_ — ADR-024 정신 그대로. M2 끝 도그푸딩 #1 도 ADR-028~031 환류로 이어진 동일 패턴.
+- [process] 다음 갈래 후보: (a) M4 진입 (Supervision restart strategy), (b) Effect TMap.remove 본체 버그 upstream 보고 (PR), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ (ADR-028) 정신상 (a) 가 자연스러운 다음 단계.

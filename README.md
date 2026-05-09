@@ -7,9 +7,9 @@
 | 항목 | 상태 |
 |---|---|
 | 버전 | 0.0.0 (미배포) |
-| 마일스톤 | M0/M1/M2/M3 완료 / M4 진행 예정 |
+| 마일스톤 | M0/M1/M2/M3/M3.1 완료 / M4 진행 예정 |
 | npm 패키지 | _M5+ 도그푸딩 후 배포 예정_ |
-| 코드 | _M3: stop / watch / ask 흐름까지 동작. 115 테스트, examples/01~04 실행 가능._ |
+| 코드 | _M3 + M3.1: stop / watch / ask + spawn race fix 완료. 118 테스트, examples/01~04 실행 가능._ |
 
 ## 무엇인가
 
@@ -46,7 +46,8 @@ _실제 동작 코드는 M1 마일스톤 완료 시 [examples/01-restart-demo.ts
 | M0 | 🟢 완료 | 설계 문서, ADR, 마일스톤 게시판 |
 | M1 | 🟢 완료 | spawn / tell / receive + setup + ctx.spawn (stable ref + mailbox 분리). 77 테스트, examples/01 동작 |
 | M2 | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook. 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계 |
-| M3 | 🟢 완료 | ctx.stop graceful + watch / watchWith / watchTerminated + ask + ChildFailed + DeathPact. 115 테스트, examples/03,04 동작. 도그푸딩 #2 진입 가능 |
+| M3 | 🟢 완료 | ctx.stop graceful + watch / watchWith / watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
+| M3.1 | 🟢 완료 | spawn race fix — Deferred latch happens-before + Effect 3.21.2 TMap.remove 본체 버그 우회. 118 테스트, consumer 측 9ms / 5회 flake-free 검증 |
 | M4 | ⚪ 다음 | Supervision (resume/restart/stop) |
 | M5 | ⚪ 대기 | Backoff / Stash / Timer |
 | M∞ | ⚪ 대기 | poly-phony 도그푸딩 → npm 배포 |

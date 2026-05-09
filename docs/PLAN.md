@@ -14,8 +14,8 @@
 | M0. 정보 모으기 | 🟢 완료 | docs/ 묶음 작성. AGENTS.md 색인 |
 | M1. 최소 동작 + setup | 🟢 완료 | spawn / tell / receive + setup + ctx.spawn (Stable ref + Mailbox 분리). 77 테스트, examples/01 동작. |
 | M2. Lifecycle | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook (자동 + 외부 emit). 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계. |
-| M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. 115 테스트, examples/03,04 동작. ⚠️ _후속 사이클 1: spawn race fix_ (도그푸딩 #2 발견) |
-| M3.1. spawn race fix | 🟡 다음 | 도그푸딩 #2 사이클 5 발견 — spawn 후 즉시 shutdown 시 children PostStop 누락. ADR-031 보강 + happens-before contract |
+| M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
+| M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | ⚪ 대기 | Supervision strategies (resume/restart/stop) |
 | M5. 고급 기능 | ⚪ 대기 | Backoff / withLimit / Stash / Timer |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
@@ -149,12 +149,13 @@
 - ask 의 임시 actor 가 `Deferred` 에 응답 set, fiber 가 await — Effect.race(Deferred.await, sleep(timeout))
 - ChildFailed 의 cause 표현 (EffectTS Cause<E> 그대로 노출?)
 
-**마일스톤 완료 조건 (DoD):**
+**마일스톤 완료 조건 (DoD) — 모두 충족 ✅:**
 - [x] `examples/03-watch.ts` — watchWith + ctx.stop graceful (자식 종료 알림 + 메시지 채널)
 - [x] `examples/04-ask.ts` — ask 패턴 + AskTimeout 캐치
 - [x] `ctx.stop` 의 graceful cascade 동작 (자식 PostStop 호출 검증, ADR-031)
 - [x] DeathPact 검출 (watch + Unhandled Terminated → fail → 부모 ChildFailed 연쇄, ADR-022)
-- [ ] **M3 끝 도그푸딩 (~1주, ADR-024)** — watch + ask 조합 의미 + poly-phony 의 4 결정 wrapper 검증. _코드 작업 끝, 사용자 측 도그푸딩 단계._
+- [x] **M3 끝 도그푸딩 (ADR-024)** — 도그푸딩 #2 5 사이클 완료. wrapper 3종 (typed err / Stream pass-through / watch+ask race) 검증, factory 패턴 표준 확정, spawn race BUG 발견 → M3.1 환류로 fix.
+- [x] **M3.1 사이클 1 — spawn race fix** — 두 layer fix 완료, consumer 측 9ms / 5회 flake-free 재검증.
 
 **완료된 사이클:**
 - 🟢 사이클 1 — `ctx.stop(child)` graceful cascade (ADR-031): stopActor 재사용 가능 helper, sys.shutdown 도 같은 흐름. 4 테스트
@@ -163,6 +164,11 @@
 - 🟢 사이클 4 — `ctx.ask` (ADR-029): 임시 actor + Deferred + Effect.timeoutFail. typed err wrapper 패턴 검증. 3 테스트
 - 🟢 사이클 5 — ChildFailed signal + DeathPact: runInterpreter 의 onFailure hook + interpretSignalStep 의 unhandled 검출. 3 테스트
 - 🟢 사이클 6 — `examples/03-watch.ts` + `examples/04-ask.ts` + USAGE.md 갱신. 누적 115 테스트.
+
+**M3.1 사이클 (도그푸딩 #2 환류):**
+- 🟢 사이클 1 — spawn happens-before contract (Deferred latch) + sibling LIFO cascade (Chunk) + Effect 3.21.2 `TMap.remove` 본체 버그 우회 (TRef<HashMap>). ADR-031 보강 절 3개. 누적 118 테스트. 사용자 표면 변경 0.
+
+**M3 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 환류 fix + 재검증 모두 충족.
 
 ---
 
