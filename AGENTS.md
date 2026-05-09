@@ -26,6 +26,7 @@
 | [docs/API.md](./docs/API.md) | 사용자 API 시안 + 풍부한 예시. _시그니처가 어색하면 곧장 고침_ |
 | [docs/DECISIONS.md](./docs/DECISIONS.md) | ADR. _왜 X 대신 Y 인가_. 결정 뒤집기 전 반드시 확인 |
 | [docs/LEARNINGS.md](./docs/LEARNINGS.md) | 작업 중 알게 된 사실 누적. _같은 학습 두 번 하지 말 것_ |
+| [docs/DOGFOODING.md](./docs/DOGFOODING.md) | 도그푸딩 이력 + 본격 도그푸딩 가이드 (poly-phony 측 사용자 측 검증) |
 
 ---
 

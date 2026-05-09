@@ -255,6 +255,11 @@
 - 🟢 사이클 3 — `Behaviors.withTimers` (setup 위 헬퍼) + `ctx.fork` (instance scope 안 fork) + `ctx.scheduleOnce`. `Timers` 인터페이스 (startSingle/FixedDelay/cancel/cancelAll/isActive). `evaluateInitial` setup chain loop. `notifyWatchersOnSelfTermination` 의 instanceScope close (자발 Stopped 시 timer 자동 cleanup). ADR-039. 누적 191 테스트, 5회 flake-free.
 - 🟢 사이클 4 — `Behaviors.withStash` (setup 위 헬퍼, 사이클 3 패턴) + `Stash` 인터페이스 (stash/unstashAll/clear/size/isFull/isEmpty) + `StashOverflow` Tagged error. `unstashAll(next)` 가 `interpretStep` 직접 적용 (Akka 정통 순서 보장). 부가 발견: _Effect 밖 throw_ 가 supervision 통과 X — 별도 fix 후보. ADR-040. 누적 197 테스트, 5회 flake-free.
 - 🟢 사이클 5 — `examples/06-backoff.ts` + `07-stash.ts` + `08-timer.ts` + USAGE.md 갱신 (M5 표면 표 + Errors + 안 되는 것 정리). 모두 `pnpm tsx` 실행 검증. M5 _코드_ DoD 충족.
+- 🟢 미니 사이클 — _Effect 밖 throw_ 안전망 (interpretStep / interpretSignalStep 의 Effect.suspend wrap). ADR-040 후속 resolved. 누적 201 테스트.
+
+**M5.1 환류 사이클 (도그푸딩 #4 결과 받음 후):**
+- 🟡 사이클 1 (가이드 작성) — `docs/DOGFOODING.md` 박음. 5 사이클 분할 + 검증 약속 + 결과 형식. AGENTS.md 색인. _poly-phony 측 진행 신호 대기 중._
+- [ ] 사이클 2~N — finding 도착 시 환류 fix + 재검증. M3.1 / M4.1 패턴 그대로.
 
 ---
 

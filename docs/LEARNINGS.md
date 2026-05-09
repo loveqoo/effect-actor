@@ -604,3 +604,13 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [test] 4 통합 테스트 추가 (총 201, 이전 197+4): receiveMessage 직접 throw / receive 직접 throw / receiveSignal 직접 throw (PreRestart 재실패 경로) / Effect.sync 회귀. 5회 flake-free.
 - [insight] **사용자 학습 비용 0.** 기존 `Effect.sync(() => { throw })` 패턴 그대로 + _직접 throw_ 도 잡힘. 사용자 의식 X — _문서 추가_ 도 불요. _안전망_ 의 본질은 _보이지 않는 fix_.
 - [process] 미니 사이클 = _라이브러리 설계 우선_ (ADR-028) 정신의 _도그푸딩 입력 직전 표면 다듬기_ 패턴 첫 사례. M5.1 입력 받기 전에 사용자가 _자연스럽게_ 부딪힐 cliff 미리 처리. 이후 도그푸딩 _진짜 finding_ 만 입력으로 들어옴 — 사이클 5 의 examples 작성 시점에 이미 cliff 알았기에 _examples 패턴_ 도 일관 (Effect.sync 안 throw) 으로 굳혀둠.
+
+
+
+### 2026-05-09 — M5.1 도그푸딩 가이드 작성 (docs/DOGFOODING.md 박음)
+
+- [process] **별도 영구 가이드 파일 (`docs/DOGFOODING.md`) 도입.** 이전 #1~#3 도그푸딩은 _대화 안_ 가이드 + LEARNINGS 박힘. #4 부터 _본격_ 이라 _영구 문서_ 가치 명확. 향후 #5+ 도 이 파일 갱신.
+- [design] **5 사이클 분할 — 사이클 #2 / #3 패턴 그대로.** (1) supervise + matcher chain (M4 + M5 backoff/withLimit), (2) withTimers + ctx.fork, (3) withStash 초기화, (4) watchWith + ask + scheduleOnce, (5) 종합 + stress. 각 사이클 _구체 도메인 시나리오_ — agent 의 _실제 사용_ 패턴이라 합성 표면 노출.
+- [process] **_이미 fix 된 cliff_ 표 박음.** #2/#3 의 finding 들 (spawn race / 의제 1+2 / F1 / Effect 밖 throw) 모두 _이미 fix_ — #4 에서 _재발견되면 회귀_. 회귀 안전 검증 자동.
+- [process] AGENTS.md + CLAUDE.md 색인 갱신 — 새 가이드 진입점 등록.
+- [process] PLAN.md M5.1 환류 사이클 박음 — _가이드 작성_ 사이클 1, 사이클 2+ 는 finding 도착 시 환류 fix.
