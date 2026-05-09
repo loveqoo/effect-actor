@@ -280,3 +280,67 @@
 - [process] **M3 마일스톤 _전체_ DoD 확정.** 사이클 6 + M3 끝 도그푸딩 #2 (5 사이클) + M3.1 사이클 1 (spawn race fix 두 layer + consumer 측 9ms / 5회 flake-free 재검증) 모두 충족. PLAN.md M3 상태 표기 🟢 완료 / M3.1 도 🟢 완료. 누적 118 테스트.
 - [process] M3 의 _진짜 완료_ 는 코드 작성 끝 (사이클 6) 이 아니라 _도그푸딩 환류 fix 까지 통과한 시점_ — ADR-024 정신 그대로. M2 끝 도그푸딩 #1 도 ADR-028~031 환류로 이어진 동일 패턴.
 - [process] 다음 갈래 후보: (a) M4 진입 (Supervision restart strategy), (b) Effect TMap.remove 본체 버그 upstream 보고 (PR), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ (ADR-028) 정신상 (a) 가 자연스러운 다음 단계.
+
+
+
+### 2026-05-09 — M4 사이클 1 (Strategy ADT + Behaviors.supervise 빌더)
+
+- [design] Akka Typed 의 `Behaviors.supervise(b).onFailure[E](r1).onFailure[E2](r2)` 체인을 fluent 빌더로 그대로 옮김. `SupervisedBehavior<Msg>` 가 `_tag: "Supervise"` + immutable `rules` + 새 객체 반환 `onFailure` 메서드. `receiveSignal` (M2) 패턴과 일관 — 사용자 학습 표면 단일.
+- [design] _체인 순서 = rules 배열 순서 = 매처 순회 순서_ 약정 (가장 안쪽이 가장 specific). 사이클 4 의 sequential 매처 순회가 그대로 받음. 빌더 단계서 정렬/재배열 X.
+- [design] `BehaviorMeta` 에 `supervisor: ReadonlyArray<SupervisorRule>` 추가. 빈 배열 = 기본 stop (현재 default 동작 유지). 사이클 2/3 의 interpreter 분기 입력.
+- [design] `unwrapMeta` 가 _두 다른 종류 래퍼_ (WithMailbox + Supervise) 양쪽 추출 — 어느 순서로 nest 해도 양쪽 모두 잡음. 같은 종류 nested 는 _가장 바깥_ 만 (ADR-026 정신 유지). 구현은 최대 2회 loop. ADR-034 박음.
+- [runtime] `interpretStep` 의 invariant violation fallback (`Setup` / `WithMailbox` / `Supervise` 도달 시 `Effect.succeed(current)`) 에 `Supervise` 추가. spawn 0단계가 풀어줘야 하는 케이스라 정상 흐름 도달 X.
+- [test] 10 테스트 추가 (총 128). Strategy ADT 참조 동일성 + 빌더 immutability + 체인 순서 + meta 추출 (단독 / 중첩 / 두 종류 조합 / 두 종류 + nested 같은 종류 혼합). ADR-026 의 nested 같은 종류 = 가장 바깥 규칙 회귀 보호.
+- [process] 사이클 1 산출이 사이클 2/3 에 _그대로_ 입력 — interpreter 의 catchAllCause 가 `meta.supervisor` 만 보면 됨. supervisor 없는 (빈 배열) 케이스 = 현 default stop 그대로 동작 → 회귀 0.
+
+
+
+### 2026-05-09 — M4 사이클 2 (Strategies.resume — step-level supervision)
+
+- [runtime] supervision 의 _granularity_ 결정: messageLoop 의 _step 단위_ Effect.exit. 한 메시지/시그널 처리 한 번이 한 step → 그 안 fail 만 supervisor 분기. PostStop 처리는 supervision 밖 (최후 정리 의미 — Resume 으로 PostStop 무시되면 액터 영구 살아 있어 의미상 어색).
+- [runtime] Resume 의미 = "current 그대로, 실패한 메시지/시그널 무시" — `continue` 한 줄. cell/mailbox/uid 모두 자동 보존 (cell 인스턴스 그대로). lastActive 도 유지 (current 안 바뀜).
+- [runtime] 외부 catchAllCause (runInterpreter 외피) 는 _최종 stop 강등_ 한정 — Resume 은 messageLoop 안에서 흡수, hook (parent ChildFailed 알림) 호출 X. Restart 도 같은 정신 (사이클 3에서). 즉 외부 외피 = "final stop" 표면.
+- [design] `pickStrategy(rules, cause): Strategy` 헬퍼 — cause 에서 error 추출 (failureOption → defects → cause 자체) → rules sequential 순회 → 첫 매치 strategy. 빈 rules / 미매치 = 기본 stop. 사이클 4 의 매처 헬퍼 도입 시 표면 유지하고 내부만 보강.
+- [design] cause squash 우선순위 — `Cause.failureOption` 우선 (typed fail), 그 다음 `Cause.defects` (Effect.die / throw), 마지막 cause 자체 (interrupted 등 매처 적용 어려운 케이스). interrupted 케이스에 매처가 매치하기 어렵게 의도 — restart 회피.
+- [test] 10 테스트 추가 (총 138): pickStrategy 단위 5개 + Resume 통합 5개 (Resume 정상, 미매치 stop, supervise 안 함 = default stop 회귀, defect 잡음, 다회 fail 흡수). 회귀 안전 — 기존 128 모두 통과.
+- [process] 사이클 2 산출이 사이클 3 에 _그대로_ 입력 — interpretterLoop 의 `if (strategy._tag === "Restart") { ... }` 한 분기만 추가하면 됨. Resume/Stop 흐름 변경 X.
+
+
+
+### 2026-05-09 — M4 사이클 3 (Strategies.restart + PreRestart 흐름)
+
+- [design] **Scope 모델 정정** — ADR-020 ("supervision = 같은 fiber") + ADR-021 ("instance Scope = restart 시 닫고 새로") 가 _같은 단일 scope_ 위에서 충돌. 단일 scope 닫으면 _interpreter fiber 도 죽음_ → restart 가 자기 fiber 자살. **ADR-035** 로 정정: ActorEntry 에 `cellScope` (lifetime, immutable) + `instanceScope` (TRef, instance 마다 새로). instanceScope = `Scope.fork(cellScope, sequential)` — child 관계라 cellScope.close 면 instanceScope 도 자동. Stop 흐름 boilerplate 안 늘어남.
+- [runtime] Akka ActorCell 의 lifetime 모델 그대로 — cell 영구 + 자기 fiber 영구 + restart 마다 새 instance. interpreter fiber 가 entry.cellScope 에 fork → restart 거쳐도 같은 fiber. 사용자 fork/timer/scoped resource (M5+) 는 instanceScope 에 → restart 시 자동 정리.
+- [runtime] **messageLoop = outer (restart loop) + inner (message loop)**. inner step fail → pickStrategy → Restart 면 inner break + needRestart=true. outer 가 PreRestart 신호 발사 (lastActive 의 onSignal) → onRestart 콜백 (자식 cascade + instanceScope 교체) → outer continue → initial 재평가 → 새 incarnation. 같은 fiber 안 재진입.
+- [runtime] **자식 cascade stop on restart** — 기존 stopActor 의 children 부분과 동일 (LIFO + concurrency:1). children TRef 는 stopActor 가 parent.children 에서 자동 제거하므로 outer 가 별도 비우기 X.
+- [design] **PreRestart fail 시 단순화** — 사이클 3 에선 fail 그대로 외부 propagate (stop 강등). Akka 정통은 _재귀 supervision + max retry_ — M5/withLimit 후속. 사이클 3 단계는 _hook fail = stop_ 안전망.
+- [design] messageLoop 가 system 의 cleanup 에 의존하지 않게 _onRestart 콜백_ 으로 분리. messageLoop = restart mechanics (PreRestart 발사 + initial 재평가 + loop 재진입), system = 측면 정리 (자식 cascade + instanceScope 교체). 결합도 낮음.
+- [runtime] **happens-before contract 보존** — startedLatch 는 `firstStart` 플래그로 _첫 spawn 직후만_ succeed. Restart 후엔 latch 이미 succeed 상태라 외부 spawn await 영원 X. M3.1 의 race fix 와 정합.
+- [test] 6 통합 테스트 추가 (총 146): Setup 재실행 + ref 안정 / mailbox 보존 / PreRestart hook 호출 / 자식 cascade stop / 매처 미매치 = stop 회귀 / 다회 restart 안정. entry.test.ts 도 +2 (cellScope/instanceScope 분리 검증).
+- [process] 큰 구조 변경 (Scope 분리) 을 _restart 본 구현 직전_ 에 단독으로 박고 회귀 0 확인 후 본체. 변경 단위 작게 → 디버그 표면 단순. 사이클 3 안에서 두 단계 (3a scope 분리, 3b restart) 로 사실상 분할.
+
+
+
+### 2026-05-09 — M4 사이클 4 (Error matcher 헬퍼 + 순회 약정)
+
+- [design] Akka 의 `.onFailure[E](strategy)` _타입 매칭_ 표면을 TS 로 못 옮김 (런타임 instanceof 만 가능). 두 노선:
+  - (A) `.onFailure(ctor, strategy)` 오버로드 — 자연스러움 ↑, TS 시그너처 분기 어려움.
+  - (B) 헬퍼 (`Strategies.matchInstance(Ctor)`) — boilerplate 약간, 표면 일관, ADR-028 정신.
+  - **(B) 채택, ADR-036.** 사용자가 specific → general 순으로 작성: `.onFailure(matchInstance(IllegalState), restart).onFailure(matchInstance(IO), resume).onFailure(matchAll, stop)`.
+- [design] 헬퍼 3개: `matchInstance(Ctor)` (`instanceof`), `matchTag(string)` (`_tag` 필드 — Effect.TaggedError / Data.tagged 호환), `matchAll` (`() => true`, catch-all). 사용자가 직접 `(e) => ...` 로 합성도 OK — 헬퍼는 _공통 패턴 단축_.
+- [runtime] `pickStrategy` 알고리즘 변경 0 — 사이클 2 의 sequential 순회 그대로. 헬퍼만 추가 → 회귀 안전.
+- [test] 10 테스트 추가 (총 154): 매처 헬퍼 단위 4개 (matchInstance / instanceof subtype / matchTag / matchAll) + 매처 chain 통합 4개 (Akka 모양 IllegalState→restart, IO→resume, catch-all→stop / 첫 매치 채택 (specific 우선) / DeathPactException matchTag / 미매치 = 기본 stop 회귀).
+- [discovery/!] **자발 Stopped 는 watcher 알림 안 감** — 사이클 4 DeathPactException 통합 테스트 작성 도중 발견. 현재 `stopActor` 만 watchers 알림 발사. messageLoop 의 _자발 Stopped → PostStop emit → fiber 종료_ 흐름은 `entry.watchers` 알림 없이 끝남. Akka Typed 정통: 자발 Stopped 도 termination → watcher 알림 가야. _별개 의제_, 사이클 4 본질 (매처) 과 무관해 우회 (직접 `Effect.die(new DeathPactException(...))` 로 트리거). M4 끝 도그푸딩 (사이클 5) 또는 M5 에서 결정.
+- [process] 사이클 4 산출 = 헬퍼 + ADR. 알고리즘 변경 0 — 사이클 1~3 의 토대가 _깔끔_ 하면 다음 사이클이 _작아진다_ 는 정신 (ADR-024) 그대로. 사이클 4 가 가장 작은 사이클 (~30분).
+
+
+
+### 2026-05-09 — M4 사이클 5 (examples/05-restart + 발견 의제 정리)
+
+- [examples] `examples/05-restart.ts` 작성 + 동작 확인. 시연 항목: supervise 빌더 + restart 매처 / stable ref+uid / mailbox 보존 (Boom 이후 Inc/Show 메시지가 새 incarnation 처리) / Setup 재실행 (counter 0 으로 리셋 + 자식 다시 spawn) / PreRestart hook 호출 / 자식 cascade stop / 매처 chain (TypeError → restart, catch-all → stop). 출력 trace 가 모든 요소 확인.
+- [discovery/!] **Supervisor stop 강등 시 PostStop hook 안 호출** — examples/05 의 fatal (RangeError, 미매치) 출력에서 `[counter] PostStop` 안 나옴. 흐름: step fail → pickStrategy → 미매치 → messageLoop return Effect.failCause → 외부 catchAllCause 가 흡수 → fiber 종료. _자발 Stopped_ 흐름 (postStopHandled 플래그) 거치지 않아 PostStop hook skip. ADR-021 의 "PostStop = 자동 hook (instance Scope finalizer 와 보완)" 약속과 모순. _root 의 shutdown_ 시 stopActor 가 자기 PostStop offer 하지만 fiber 이미 종료라 처리 안 됨 — 자식 cascade 는 stopActor 가 직접 처리해서 OK.
+- [discovery/!] **자발 Stopped 시 watcher 알림 안 감** (사이클 4 발견 재확인) — Akka Typed: 자발 stop 도 termination → watcher 알림 가야. 현재는 외부 stopActor 만 알림 발사. messageLoop 의 자발 Stopped → PostStop emit → fiber 종료 흐름은 watchers 알림 없이 끝남.
+- [discovery] **PreRestart 처리 도중 fail 시 단순 stop 강등** — 사이클 3 결정으로 일단 단순화 (재귀 supervision 없음). M5 withLimit (재시도 한도) 와 함께 본격 처리 예정. 현재 단계는 _안전망_.
+- [process] **세 발견 의제는 같은 패밀리** — _stop/cleanup 흐름의 여러 경로 정합성_. 자발 Stopped / 외부 ctx.stop / supervisor stop 강등 / supervisor restart — 각 경로의 PostStop / watcher / Scope cleanup / fiber 종료 약속이 통일되지 않음. M4 끝 도그푸딩 + ADR-037 (가칭 _stop 경로 통일_) 후보.
+- [process] DoD 부분 체크 — `examples/05` 항목 ✅. _M4 끝 도그푸딩 (~1주, ADR-024)_ 항목은 _사용자 진행 대기_ — M4 _전체_ DoD 확정은 도그푸딩 환류 fix 후 (M3 패턴과 동일).
+- [process] 도그푸딩 진행 방향 결정 — **poly-phony 측에서 직접** (M3 도그푸딩 #2 패턴 동일). 사이클 5 는 examples/05 + 발견 의제 정리로 닫고, 도그푸딩 입력 받으면 M4.도그푸딩 / M4.1 환류 fix 후속 사이클 진행 예정. 사이클 5 발견 3 의제 (supervisor stop PostStop / 자발 Stopped watcher / PreRestart 재실패) 도 poly-phony 사용 중 _실제 노출_ 되는지 확인 후 우선순위 정함.

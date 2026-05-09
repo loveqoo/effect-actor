@@ -32,9 +32,19 @@ export type { ActorSystemHandle } from "./ref.js"; // internal handle (사용자
 export { ActorContext } from "./context.js";
 
 // behavior + 해석기
-export type { Behavior, BehaviorEffect, BehaviorMeta } from "./behavior.js";
+export type {
+  Behavior,
+  BehaviorEffect,
+  BehaviorMeta,
+  ReceiveBehavior,
+  SupervisedBehavior,
+} from "./behavior.js";
 export { Behaviors, unwrapMeta } from "./behavior.js";
 export { interpretStep, runInterpreter } from "./interpreter.js";
+
+// supervision (M4)
+export type { ErrorMatcher, Strategy, SupervisorRule } from "./supervision.js";
+export { pickStrategy, Strategies } from "./supervision.js";
 
 // system (사용자 entry point)
 export { ActorSystem } from "./system.js";

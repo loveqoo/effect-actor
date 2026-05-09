@@ -1,10 +1,12 @@
-import { Cause, Deferred, Effect, Option, Queue } from "effect";
+import { Cause, Deferred, Effect, Exit, Option, Queue } from "effect";
 import type { Behavior, BehaviorEffect } from "./behavior.js";
 import type { ActorContext } from "./context.js";
 import type { ActorEntry } from "./entry.js";
 import { DeathPactException } from "./errors.js";
 import type { Signal } from "./signal.js";
 import { Signal as SignalNs } from "./signal.js";
+import type { SupervisorRule } from "./supervision.js";
+import { pickStrategy } from "./supervision.js";
 
 // 한 메시지를 한 Behavior 에 적용해 _다음_ Behavior 계산.
 // Setup/WithMailbox 는 spawn 0단계에서 풀려 도달 안 함 — 도달하면 invariant violation, 안전하게 그대로.
@@ -25,6 +27,7 @@ export const interpretStep = <Msg>(
       );
     case "Setup":
     case "WithMailbox":
+    case "Supervise":
       // spawn 0단계가 풀어줘야 하는 케이스 — 여기까지 오면 invariant violation. 안전 fallback.
       return Effect.succeed(current);
   }
@@ -101,43 +104,112 @@ const takeNext = <Msg>(entry: ActorEntry<Msg>): Effect.Effect<Inbox<Msg>> =>
 
 // messageLoop — 액터의 메인 루프.
 // M2 사이클 3 (ADR-021 §3.8): PostStop hook 자동 emit.
-// - 자발 Stopped → 마지막 active Receive 의 onSignal(PostStop) 자동 호출
-// - 외부 signalQueue.offer(PostStop) → 마지막 active Receive 의 onSignal 호출 후 fiber 자발 종료
-// - 두 케이스 모두 _한 번만_ PostStop 처리 (postStopHandled 플래그)
+//   - 자발 Stopped → 마지막 active Receive 의 onSignal(PostStop) 자동 호출
+//   - 외부 signalQueue.offer(PostStop) → 마지막 active Receive 의 onSignal 호출 후 fiber 자발 종료
+//   - 두 케이스 모두 _한 번만_ PostStop 처리 (postStopHandled 플래그)
 // M3.1: optional startedLatch — Setup 평가 후 succeed → spawn 의 happens-before contract.
+// M4 사이클 2 (ADR-034): step-level supervisor 분기. step fail 시 pickStrategy → Resume 면 current 그대로 continue.
+//   Stop / 미매치 = fail propagate (외부 catchAllCause 가 hook).
+//   PostStop step 은 supervision 밖 — 최후 정리 의미. Resume 으로 PostStop 무시되면 액터 영구 살아 있어 의미상 불가.
+// M4 사이클 3 (ADR-020/035): Restart 흐름 — outer (restart) + inner (message) 두 loop.
+//   PreRestart 신호 → 현재 Behavior 가 처리 → onRestart 콜백 (자식 cascade + instanceScope 교체) → initial 재평가 → loop 재진입.
+//   같은 fiber 안에서 재진입 — ref/uid/cell/cellScope 모두 보존, instanceScope 만 새로.
 const messageLoop = <Msg>(
   initial: Behavior<Msg>,
   entry: ActorEntry<Msg>,
   ctx: ActorContext<Msg>,
+  supervisor: ReadonlyArray<SupervisorRule>,
   startedLatch?: Deferred.Deferred<void, never>,
+  onRestart?: () => Effect.Effect<void>,
 ): Effect.Effect<void, unknown> =>
   Effect.gen(function* () {
-    let current = yield* evaluateInitial(initial, ctx);
-    if (startedLatch) {
-      yield* Deferred.succeed(startedLatch, void 0 as void);
-    }
-    let lastActive = current;
+    let firstStart = true;
     let postStopHandled = false;
+    // PostStop emit 시 사용 — outer 마지막 active 보존
+    let lastActive: Behavior<Msg> = initial;
 
-    while (current._tag !== "Stopped" && !postStopHandled) {
-      const inbox = yield* takeNext(entry);
-      if (inbox._tag === "Sig") {
-        if (inbox.signal._tag === "PostStop") {
-          // 외부 PostStop — 처리 후 자발 종료. lastActive 가 받음.
+    // outer: restart loop. continue = restart 재시작. break/return = 종료.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // (Re)start: Setup 재평가 (Setup 이면 init 재실행, 아니면 initial 그대로).
+      let current = yield* evaluateInitial(initial, ctx);
+      lastActive = current;
+
+      if (firstStart && startedLatch) {
+        // M3.1 happens-before contract — 첫 spawn 직후만. restart 후엔 latch 이미 succeed.
+        yield* Deferred.succeed(startedLatch, void 0 as void);
+      }
+      firstStart = false;
+
+      // inner: message loop. 한 incarnation 동안.
+      let needRestart = false;
+      let needStop = false;
+      let stopCause: Cause.Cause<unknown> | null = null;
+
+      while (
+        current._tag !== "Stopped" &&
+        !postStopHandled &&
+        !needRestart &&
+        !needStop
+      ) {
+        const inbox = yield* takeNext(entry);
+
+        // 외부 PostStop — supervision 밖에서 처리 후 자발 종료. lastActive 가 받음.
+        if (inbox._tag === "Sig" && inbox.signal._tag === "PostStop") {
           yield* interpretSignalStep(lastActive, ctx, inbox.signal);
           postStopHandled = true;
-        } else {
-          current = yield* interpretSignalStep(current, ctx, inbox.signal);
+          continue;
         }
-      } else {
-        current = yield* interpretStep(current, ctx, inbox.msg);
+
+        const stepEffect: BehaviorEffect<Msg> =
+          inbox._tag === "Sig"
+            ? interpretSignalStep(current, ctx, inbox.signal)
+            : interpretStep(current, ctx, inbox.msg);
+
+        const exit = yield* Effect.exit(stepEffect);
+        if (Exit.isSuccess(exit)) {
+          current = exit.value;
+          if (current._tag !== "Stopped") lastActive = current;
+          continue;
+        }
+
+        // step fail — supervisor 분기.
+        const strategy = pickStrategy(supervisor, exit.cause);
+        if (strategy._tag === "Resume") {
+          continue;
+        }
+        if (strategy._tag === "Restart") {
+          needRestart = true;
+          break;
+        }
+        // Stop / 미매치
+        needStop = true;
+        stopCause = exit.cause;
+        break;
       }
-      if (current._tag !== "Stopped") {
-        lastActive = current;
+
+      if (postStopHandled || current._tag === "Stopped") {
+        // 정상 종료 (외부 PostStop 또는 자발 Stopped)
+        break;
+      }
+
+      if (needRestart) {
+        // PreRestart 처리 — 현재 Behavior 의 onSignal. fail 시 외부 propagate (사이클 3 단순화).
+        yield* interpretSignalStep(lastActive, ctx, SignalNs.PreRestart);
+        // 자식 cascade stop + instanceScope 교체 (system.ts 가 콜백으로 제공).
+        if (onRestart) yield* onRestart();
+        // outer loop 재진입 — initial 재평가 + 새 incarnation.
+        continue;
+      }
+
+      if (needStop) {
+        return yield* Effect.failCause(
+          stopCause ?? Cause.die(new Error("supervision: unknown cause")),
+        );
       }
     }
 
-    // 자발 Stopped — 자동 PostStop emit (외부 PostStop 케이스가 아니면)
+    // 자발 Stopped — 자동 PostStop emit (외부 PostStop 케이스가 아니면). supervision 밖.
     if (!postStopHandled) {
       yield* interpretSignalStep(lastActive, ctx, SignalNs.PostStop);
     }
@@ -149,6 +221,9 @@ const messageLoop = <Msg>(
 // 정상 종료 (자발 Stopped) 시 hook 호출 안 됨.
 // M3.1: optional startedLatch — spawn 의 happens-before contract (Setup 평가 후 spawn Effect 끝).
 //       Setup 평가 도중 fail 해도 supervision 외피가 흡수 → spawn 의 Deferred.await 영원 X (catchAllCause 안에서 succeed).
+// M4 사이클 2 (ADR-034): optional supervisor rules — messageLoop 가 step-level 분기. 빈 배열이면 기본 stop (현재 default).
+//   외부 catchAllCause 는 _최종 stop 강등_ 한정 — Resume / Restart 는 messageLoop 안에서 흡수, hook 호출 X.
+// M4 사이클 3 (ADR-020/035): optional onRestart — Restart strategy 발동 시 messageLoop 가 호출 (자식 cascade + instanceScope 교체).
 export const runInterpreter = <Msg>(
   initial: Behavior<Msg>,
   entry: ActorEntry<Msg>,
@@ -156,10 +231,19 @@ export const runInterpreter = <Msg>(
   options?: {
     readonly onFailure?: (cause: Cause.Cause<unknown>) => Effect.Effect<void>;
     readonly startedLatch?: Deferred.Deferred<void, never>;
+    readonly supervisor?: ReadonlyArray<SupervisorRule>;
+    readonly onRestart?: () => Effect.Effect<void>;
   },
 ): Effect.Effect<void> =>
   Effect.catchAllCause(
-    messageLoop(initial, entry, ctx, options?.startedLatch),
+    messageLoop(
+      initial,
+      entry,
+      ctx,
+      options?.supervisor ?? [],
+      options?.startedLatch,
+      options?.onRestart,
+    ),
     (cause) => {
       // Setup 평가 도중 fail 시 startedLatch 가 아직 안 끝남 → spawn 의 await 영원. 여기서 succeed 보장.
       const latchEnsure = options?.startedLatch

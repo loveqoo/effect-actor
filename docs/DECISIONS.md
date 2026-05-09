@@ -875,6 +875,207 @@ ADR-027 시점에 `effect` 를 `dependencies` 로 두고 ^3.10.0 으로 박았�
 
 ---
 
+## ADR-034: Supervisor strategy 자료구조 + supervise 빌더 + 메타 추출 (M4 사이클 1)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M4 사이클 1 — 빌더 모양 결정
+
+### 맥락
+M4 진입에서 `Behaviors.supervise(b).onFailure(matcher, strategy)` 빌더 + Strategy ADT + meta 추출 단계 결정 필요. ADR-026 의 "_가장 바깥_ 채택, 안쪽 래퍼는 inner 안에 그대로" 는 _같은 종류_ 래퍼의 중첩 규칙. Supervise + WithMailbox 두 _다른 종류_ 래퍼 조합 (어느 순서로 nest 해도) 시 양쪽 모두 추출해야 자연스러움.
+
+Akka Typed 의 `.onFailure[E1](r1).onFailure[E2](r2).onFailure[Throwable](r3)` 체인 — 가장 안쪽 (가장 먼저 추가된) 이 가장 specific, sequential 순회 → 첫 매치 채택. 미매치 = 기본 stop.
+
+### 결정
+
+**A. Strategy ADT (`src/supervision.ts`)**
+```ts
+type Strategy =
+  | { _tag: "Resume" }
+  | { _tag: "Restart" }
+  | { _tag: "Stop" };
+
+const Strategies = {
+  resume:  { _tag: "Resume" }  as const,
+  restart: { _tag: "Restart" } as const,
+  stop:    { _tag: "Stop" }    as const,
+};
+
+type ErrorMatcher = (error: unknown) => boolean;
+interface SupervisorRule { match: ErrorMatcher; strategy: Strategy }
+```
+
+**B. Behavior 래퍼 — Supervise 케이스 추가**
+```ts
+| {
+    _tag: "Supervise";
+    inner: Behavior<Msg>;
+    rules: ReadonlyArray<SupervisorRule>;
+    onFailure: (m: ErrorMatcher, s: Strategy) => SupervisedBehavior<Msg>;
+  }
+```
+
+`receiveSignal` 패턴과 동일 — wrapper 자체가 fluent 호출 가능 (immutable, 새 객체 반환).
+
+**C. `Behaviors.supervise(inner)` 빌더**
+- 빈 rules 로 시작, `.onFailure(matcher, strategy)` 마다 _뒤에 append_ — _체인 순서 = 매처 순회 순서_.
+- 빈 rules + 사이클 4 미구현이라 사이클 1 단계에선 실제 동작은 없음 (빌더 모양만). 사이클 2/3 에서 interpreter 가 rules 사용.
+
+**D. `unwrapMeta` 확장**
+- 기존 mailbox 추출에 supervisor 추출 추가.
+- _두 _다른 종류_ 래퍼 양쪽 추출_: WithMailbox(Supervise(b)) 와 Supervise(WithMailbox(b)) 둘 다 mailbox + supervisor 모두 채택.
+- _같은 종류 nested 는 가장 바깥 채택_ (ADR-026 유지): `Supervise(Supervise(b))` 면 outer rules 만, inner Supervise 는 inner 안에 그대로.
+- 알고리즘: 외곽에서 두 종류 래퍼를 _각각 한 번씩_ 벗기되 (중복 안 함), 어느 순서로 와도 양쪽 모두 잡음 (구현은 최대 2회 loop).
+
+**E. BehaviorMeta 갱신**
+```ts
+interface BehaviorMeta<Msg> {
+  mailboxPolicy: MailboxPolicy;
+  supervisor: ReadonlyArray<SupervisorRule>;  // 빈 배열이면 기본 (stop)
+  inner: Behavior<Msg>;
+}
+```
+
+### 결과
+- (+) Akka Typed 빌더 모양 그대로 (`receiveSignal` 패턴 일관).
+- (+) WithMailbox / Supervise 직교 — 사용자 nest 순서 자유.
+- (+) ADR-026 의 "같은 종류 nested = 가장 바깥" 규칙 유지. 다른 종류 조합만 양쪽 추출.
+- (+) 사이클 1 산출이 사이클 2/3 의 interpreter 분기에 _그대로_ 입력.
+- (-) 다른 종류 래퍼 추출은 _최대 2회 loop_ — ADR-026 의 "한 겹만" 보다 약간 복잡. 그러나 사용자 표면은 동일 (직관적).
+- (-) Nested Supervise (사용자가 의도해서) 는 inner 안에 갇힘 — interpreter 가 그것 까지 catch 안 함. 필요하면 후속 ADR. M4 사이클 1 범위 밖.
+
+### 후속 (M4 사이클 4)
+- ErrorMatcher chain 의 sequential 순회 + 첫 매치 채택 알고리즘 ADR. (가장 안쪽이 가장 specific 규약 명시.)
+- 매처 헬퍼 (`Strategies.matchTag`, `Strategies.matchInstance`) 시안.
+
+---
+
+## ADR-035: 액터 Scope 모델 정정 — lifetime + instance 분리 (M4 사이클 3)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M4 사이클 3 — Restart 흐름 설계 중 ADR-020/021 invariant 충돌 해소
+
+### 맥락
+ADR-020: "supervision = interpreter 와 _같은 fiber_". restart 시 fiber 가 살아있어야 PreRestart 발사 + 후속 정리 가능.
+
+ADR-021: "instance Scope = restart 시 _닫고 새로_". 사용자 fork/timer/scoped resource 자동 정리.
+
+기존 `ActorEntry.scope` 는 단일 Scope.CloseableScope 였고, spawn 시 `Effect.forkIn(runInterpreter(...), scope)` 로 _interpreter fiber 자체_ 를 그 scope 에 박았다. Restart 가 그 scope 를 close 하면 _interpreter fiber 도 같이 죽음_ — ADR-020 invariant 위배. 즉 두 ADR 이 _같은 scope 를 다른 lifetime 으로_ 보고 있어 충돌.
+
+Akka 의 ActorCell 도 _자기 자식 actor + user resource_ 가 자기 scope, _자기 fiber 자체_ 는 부모 scope. 두 lifetime 분리.
+
+### 결정
+**ActorEntry 에 두 Scope 필드:**
+
+| 이름 | 타입 | 의미 | restart 시 |
+|---|---|---|---|
+| `cellScope` | `Scope.CloseableScope` (immutable) | 액터 _전체 lifetime_ — interpreter fiber 가 여기 fork. spawn~stop 1회 사용. | 그대로 (fiber 보존) |
+| `instanceScope` | `TRef<Scope.CloseableScope>` (mutable) | 액터 _instance lifetime_ — 사용자 fork/timer/scoped resource. `cellScope` 의 fork. | close + 새로 (Scope.fork(cellScope)) |
+
+**관계:**
+- `instanceScope` 는 `cellScope` 의 child scope (`Scope.fork(cellScope)`).
+- `cellScope.close` → `instanceScope` 도 자동 cleanup. 즉 stop 흐름은 cellScope 한 줄 close 면 둘 다 정리.
+- restart 흐름만 instanceScope 만 close + 새 fork.
+
+**스폰 갱신:**
+```ts
+const cellScope = yield* Scope.make();
+const instanceScope = yield* Scope.fork(cellScope, ExecutionStrategy.sequential);
+// fiber 는 cellScope 에 fork — restart 거쳐도 살아남음
+const fiber = yield* Effect.forkIn(runInterpreter(...), cellScope);
+```
+
+**Stop 갱신:** `Scope.close(entry.cellScope, Exit.void)` — instanceScope 도 자동.
+
+**Restart 갱신 (사이클 3):**
+1. PreRestart 신호 처리
+2. 자식 cascade stop
+3. `Scope.close(currentInstanceScope, Exit.void)` — 사용자 fork/timer/scoped 만 정리. fiber 살아있음.
+4. `newInstanceScope = Scope.fork(cellScope, ...)` + `TRef.set(entry.instanceScope, newInstanceScope)`
+5. Setup 재평가 (initial 그대로) + loop 재진입
+
+### 결과
+- (+) ADR-020 (같은 fiber) + ADR-021 (instance Scope 자동 정리) 둘 다 _동시 만족_.
+- (+) Restart 가 _fiber 자살_ 없이 가능. instance 자원만 cleanup.
+- (+) Stop 흐름은 cellScope 한 줄 close 로 동일 — boilerplate 안 늘어남.
+- (+) Akka ActorCell 의 lifetime 모델 그대로 (cell 영구 + restart 마다 새 instance).
+- (-) ActorEntry 필드 +1, spawn 단계 +1 (Scope.fork). 약간 복잡.
+- (-) 사용자 ctx.fork (M5+) 시 어느 scope 에 fork 할지 명시 — instanceScope. ADR-021 표 _interpreter fiber_ 항목 추가.
+
+### 후속 (사이클 3 본체)
+- entry.ts: `cellScope` + `instanceScope: TRef` 분리. `scope` 필드명은 `cellScope` 로 rename.
+- system.ts: spawn/stop 갱신. instance scope 갱신 헬퍼.
+- ARCHITECTURE.md §3.7 Scope 표에 _interpreter fiber → cellScope_ 한 줄 추가 (별도 갱신).
+
+---
+
+## ADR-036: Error matcher 헬퍼 + 순회 약정 (M4 사이클 4)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M4 사이클 4 — `.onFailure(matcher, strategy)` 의 _매처 작성 표면_ + 순회 알고리즘 명시
+
+### 맥락
+사이클 1~3 에서 `ErrorMatcher = (e: unknown) => boolean` 자유 함수 + `pickStrategy` sequential 순회 + 첫 매치 채택은 이미 구현. 사이클 4 의 결정 거리:
+
+1. **TypeScript 에서 _Akka 의 `[E]` 타입 매칭_ 표면을 어떻게 줄 것인가?**
+   - Akka: `.onFailure[IllegalStateException](Strategy.restart)` — _타입 자체_ 가 매처.
+   - JS/TS 는 이걸 못 함 — class `instanceof` 또는 `_tag` 술어가 가장 가까움.
+   - 옵션 A: `.onFailure(ctor, strategy)` 오버로드 — class constructor 자동 인식. 자연스러움 ↑, TS 시그너처 분기 어려움.
+   - 옵션 B: 헬퍼 (`Strategies.matchInstance(Ctor)`) — 사용자 합성. boilerplate 약간, 구현 단순, 표면 일관.
+   - **옵션 B 채택** — ADR-028 (_라이브러리 정통, boilerplate 는 사용자 측 wrapper_) 정신.
+
+2. **순회 약정 명시.**
+   - 빌더 `.onFailure` 는 _뒤에 append_ → rules 배열 _인덱스 0 = 첫 호출 = 가장 안쪽 = 가장 specific_.
+   - `pickStrategy` 는 0 부터 sequential 순회 → 첫 매치 채택. 미매치 = 기본 stop.
+   - Akka 의 "가장 안쪽이 가장 구체적" 약정 그대로.
+
+3. **Cause squash 정책 재확인.**
+   - 사이클 2 그대로: `Cause.failureOption` → `Cause.defects` → cause 자체.
+   - 의도적 — interrupted cause 는 매처 매칭 어려움. restart 회피.
+   - 사용자가 _interrupted 도 잡고 싶다_ → matcher 안에서 `Cause.isInterruptedOnly` 직접 검사 (advanced).
+
+### 결정
+
+**A. `Strategies` 네임스페이스에 매처 헬퍼 3개:**
+
+```ts
+Strategies.matchInstance<T>(Ctor: new (...args: any[]) => T): ErrorMatcher
+Strategies.matchTag(tag: string): ErrorMatcher  // Effect.TaggedError 또는 _tag 필드 객체
+Strategies.matchAll: ErrorMatcher  // catch-all (() => true)
+```
+
+사용:
+```ts
+Behaviors.supervise(b)
+  .onFailure(Strategies.matchInstance(IllegalStateException), Strategies.restart)
+  .onFailure(Strategies.matchTag("DeathPactException"), Strategies.stop)
+  .onFailure(Strategies.matchAll, Strategies.stop)
+```
+
+또는 사용자가 직접 인라인 함수 — 표면 일관 (`ErrorMatcher` 자유 함수).
+
+**B. 순회 알고리즘 (불변):**
+- `pickStrategy(rules, cause)` 는 인덱스 0 부터 sequential 순회.
+- 첫 `match(error) === true` rule 의 strategy 채택.
+- 미매치 → `Strategies.stop`.
+- 빈 rules → `Strategies.stop` (기본).
+- _체인 순서가 정렬 순서_ — 사용자가 specific → general 순으로 작성.
+
+**C. `_tag` 매칭 의미** — `matchTag("X")` 는 `error._tag === "X"` 검사 (객체 + string tag). 객체 아니거나 tag 없으면 false. `Effect.TaggedError` / `Data.tagged` / 사용자 tagged ADT 모두 호환.
+
+### 결과
+- (+) 사용자 boilerplate 작음 — `Strategies.matchInstance(Error)` 한 줄.
+- (+) Akka 의 `[E]` 표면과 _구조적 친숙_ — 매처 위치만 다름.
+- (+) `pickStrategy` 알고리즘 변경 X — 사이클 2 구현 그대로 유지. 헬퍼만 추가.
+- (+) Effect 의 `Data.tagged` / `TaggedError` 와 자연 호환 (`matchTag`).
+- (-) Akka 처럼 _컴파일 타임 타입 체크_ 안 됨 — runtime instanceof 만. TS 의 한계.
+- (-) interrupted cause 잡기 어려움 (의도) — advanced 사용자가 직접 cause 검사.
+
+### 후속 (M5+)
+- `Strategies.matchSchema(...)` 시안 (Effect Schema 기반 매칭) — 도그푸딩 입력 후.
+- 매처 합성 헬퍼 (`Strategies.or`, `Strategies.and`) — 필요 시.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

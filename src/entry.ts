@@ -1,6 +1,7 @@
 import {
   Chunk,
   Effect,
+  ExecutionStrategy,
   Fiber,
   HashMap,
   Option,
@@ -14,11 +15,12 @@ import type { ActorPath } from "./path.js";
 import type { WatchKey, WatchMessage } from "./signal.js";
 import type { ActorStatus } from "./status.js";
 
-// ActorEntry — Registry 의 한 항목 (ADR-017, ADR-022).
+// ActorEntry — Registry 의 한 항목 (ADR-017, ADR-022, ADR-035).
 // invariant (ARCHITECTURE.md §2.3):
 // - cell 인스턴스는 entry 수명 내내 동일 (restart 해도 보존)
-// - fiber 는 restart 시 교체
-// - scope 는 instance lifetime — restart 시 닫고 새로
+// - cellScope 는 actor _전체 lifetime_ (interpreter fiber 가 여기 fork). spawn~stop 1회.
+// - instanceScope 는 actor _instance lifetime_ (사용자 fork/timer/scoped resource). restart 시 닫고 새로 — TRef 로 mutable.
+// - fiber 는 spawn 시 1회 fork, restart 거쳐도 _같은 fiber_ (ADR-020).
 //
 // 구현 노트: watchers/watching 은 원래 TMap 으로 두려 했으나 Effect 3.21.2 의
 // TMap.remove/removeAll 가 partition 술어를 잘못 다뤄 (registry.ts 주석 참고)
@@ -34,16 +36,20 @@ export interface ActorEntry<Msg> {
   readonly watching: TRef.TRef<HashMap.HashMap<WatchKey, WatchMessage>>;
   readonly fiber: TRef.TRef<Option.Option<Fiber.Fiber<void, never>>>;
   readonly status: TRef.TRef<ActorStatus>;
-  readonly scope: Scope.CloseableScope;
+  // ADR-035: lifetime / instance 분리.
+  // cellScope close → instanceScope 도 자동 close (parent-child 관계).
+  readonly cellScope: Scope.CloseableScope;
+  readonly instanceScope: TRef.TRef<Scope.CloseableScope>;
 }
 
 // STM 안에서 entry 의 변경 가능 부분 (TRef) 초기화.
-// cell/scope 는 외부에서 미리 만들어 주입 — STM 밖 자원이라 이 단계에 함께 못 만듬.
+// cell/scopes 는 외부에서 미리 만들어 주입 — STM 밖 자원이라 이 단계에 함께 못 만듬.
 const makeStm = <Msg>(args: {
   readonly path: ActorPath;
   readonly uid: string;
   readonly cell: Cell<Msg>;
-  readonly scope: Scope.CloseableScope;
+  readonly cellScope: Scope.CloseableScope;
+  readonly instanceScope: Scope.CloseableScope;
 }): STM.STM<ActorEntry<Msg>> =>
   STM.gen(function* () {
     const children = yield* TRef.make(Chunk.empty<ActorPath>());
@@ -55,6 +61,7 @@ const makeStm = <Msg>(args: {
     );
     const fiber = yield* TRef.make(Option.none<Fiber.Fiber<void, never>>());
     const status = yield* TRef.make<ActorStatus>("running");
+    const instanceScope = yield* TRef.make(args.instanceScope);
     return {
       path: args.path,
       uid: args.uid,
@@ -64,7 +71,8 @@ const makeStm = <Msg>(args: {
       watching,
       fiber,
       status,
-      scope: args.scope,
+      cellScope: args.cellScope,
+      instanceScope,
     };
   });
 
@@ -78,13 +86,18 @@ const create = <Msg>(args: {
     const cell = yield* CellNs.make<Msg>(
       args.mailboxPolicy ?? MailboxPolicy.unbounded,
     );
-    const scope = yield* Scope.make();
+    const cellScope = yield* Scope.make();
+    const instanceScope = yield* Scope.fork(
+      cellScope,
+      ExecutionStrategy.sequential,
+    );
     const entry = yield* STM.commit(
       makeStm<Msg>({
         path: args.path,
         uid: args.uid,
         cell,
-        scope,
+        cellScope,
+        instanceScope,
       }),
     );
     return entry;

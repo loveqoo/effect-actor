@@ -6,6 +6,7 @@ import {
   Duration,
   Effect,
   Equal,
+  ExecutionStrategy,
   Exit,
   Fiber,
   HashMap,
@@ -67,8 +68,13 @@ const spawnInternal = <Msg>(
     // 3. Cell (ADR-019)
     const cell = yield* Cell.make<Msg>(meta.mailboxPolicy);
 
-    // 4. Instance Scope (ADR-021)
-    const scope = yield* Scope.make();
+    // 4. Scope 두 개 (ADR-035): cellScope = lifetime (interpreter fiber 여기 fork),
+    //    instanceScope = instance (사용자 fork/timer). instanceScope 는 cellScope 의 child.
+    const cellScope = yield* Scope.make();
+    const instanceScope = yield* Scope.fork(
+      cellScope,
+      ExecutionStrategy.sequential,
+    );
 
     // 5,6,7. ActorEntry + Registry.register + parent.children 갱신 — _한 STM tx_ (ADR-017)
     const entry = yield* STM.commit(
@@ -77,7 +83,8 @@ const spawnInternal = <Msg>(
           path: args.path,
           uid,
           cell,
-          scope,
+          cellScope,
+          instanceScope,
         });
         yield* Registry.register(spawnCtx.registry, e);
         if (args.parentEntry !== null) {
@@ -105,15 +112,20 @@ const spawnInternal = <Msg>(
     // 도그푸딩 #2 사이클 5 의 race 해결. 사용자 setup 안 ctx.spawn 들도 같은 보장 → 재귀 happens-before.
     const startedLatch = yield* Deferred.make<void, never>();
 
-    // 9. Fiber.fork — instance Scope 안에서 (ADR-021 자동 cleanup).
+    // 9. Fiber.fork — _cellScope_ 안에서 (ADR-035): restart 거쳐도 같은 fiber 유지. Stop 시만 종료.
+    // instanceScope 는 cellScope 의 child 라 cellScope close 시 자동 cleanup → 사용자 자원도 정리.
     // onFailure hook — supervision 외피가 잡은 Cause 를 부모에게 ChildFailed 로 알림 (M3 사이클 5).
+    // supervisor — meta 추출된 SupervisorRule 배열. 빈 배열이면 기본 stop (M4 사이클 2, ADR-034).
+    // onRestart — restart 발동 시 자식 cascade + instanceScope 교체 (M4 사이클 3, ADR-020/035).
     const fiber = yield* Effect.forkIn(
       runInterpreter(meta.inner, entry, ctx, {
         onFailure: (cause) =>
           notifyParentOfChildFailure(spawnCtx.registry, entry, cause),
         startedLatch,
+        supervisor: meta.supervisor,
+        onRestart: () => restartCleanup(spawnCtx.registry, entry),
       }),
-      scope,
+      cellScope,
     );
 
     // 10. entry.fiber 갱신 (STM tx)
@@ -165,6 +177,41 @@ const makeChildContext = <Msg>(
       make: (replyTo: ActorRef<Resp>) => TargetMsg,
       timeout: Duration.DurationInput,
     ) => askOther(spawnCtx, selfEntry, target, make, timeout),
+  });
+
+// restartCleanup — Restart strategy 발동 시 messageLoop 의 onRestart 콜백 (ADR-020/035, M4 사이클 3).
+// 1. 자식 cascade stop (LIFO) — children TRef 는 stopActor 가 parent.children 에서 자동 제거하므로 비워짐.
+// 2. instanceScope close + 새 fork (cellScope 의 child) — 사용자 fork/timer/scoped resource 정리.
+// cellScope / cell / uid / path 모두 보존 — ref 안정 + mailbox 보존.
+const restartCleanup = <Msg>(
+  registry: RegistryT,
+  entry: ActorEntryT<Msg>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    // 1. 자식 cascade stop — stopActor 의 children 부분과 동일 흐름.
+    const childChunk = yield* STM.commit(TRef.get(entry.children));
+    const childArray = Chunk.toReadonlyArray(Chunk.reverse(childChunk));
+    yield* Effect.forEach(
+      childArray,
+      (childPath) =>
+        STM.commit(Registry.resolve(registry, childPath)).pipe(
+          Effect.flatMap((found) =>
+            Option.isSome(found)
+              ? stopActor(registry, found.value)
+              : Effect.void,
+          ),
+        ),
+      { concurrency: 1, discard: true },
+    );
+
+    // 2. instanceScope close + 새 fork. cellScope 는 그대로 (interpreter fiber 유지).
+    const oldInst = yield* STM.commit(TRef.get(entry.instanceScope));
+    yield* Scope.close(oldInst, Exit.void);
+    const newInst = yield* Scope.fork(
+      entry.cellScope,
+      ExecutionStrategy.sequential,
+    );
+    yield* STM.commit(TRef.set(entry.instanceScope, newInst));
   });
 
 // notifyParentOfChildFailure — supervision 외피의 Cause 를 부모에게 ChildFailed 로 알림 (ADR-022).
@@ -227,8 +274,9 @@ const stopActor = <Msg>(
       yield* Fiber.await(fiberOpt.value);
     }
 
-    // 자동 cleanup (instance Scope) + queue 정리
-    yield* Scope.close(entry.scope, Exit.void);
+    // 자동 cleanup — cellScope close 면 instanceScope 도 자동 (ADR-035 child 관계).
+    // Stop 흐름은 cellScope 만 close 하면 됨. 사용자 fork/timer + interpreter fiber 의존 자원 모두 정리.
+    yield* Scope.close(entry.cellScope, Exit.void);
     yield* Queue.shutdown(entry.cell.mailbox);
     yield* Queue.shutdown(entry.cell.signalQueue);
 

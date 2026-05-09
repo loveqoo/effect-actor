@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   Chunk,
   Effect,
+  ExecutionStrategy,
   Exit,
   HashMap,
   Option,
@@ -99,24 +100,68 @@ describe("ActorEntry", () => {
       }),
     ));
 
-  it("scope close 가 되면 entry 의 자원 cleanup 동작", () =>
+  it("cellScope close 가 되면 entry 의 자원 cleanup 동작 (ADR-035)", () =>
     run(
       Effect.gen(function* () {
         let cleaned = false;
         const path = ActorPath.root("demo");
         const entry = yield* ActorEntry.create<string>({ path, uid: "u" });
 
-        // scope 안에 finalizer 등록
+        // cellScope 안에 finalizer 등록 (lifetime — interpreter fiber 자리)
         yield* Scope.addFinalizer(
-          entry.scope,
+          entry.cellScope,
           Effect.sync(() => {
             cleaned = true;
           }),
         );
 
         // 닫기
-        yield* Scope.close(entry.scope, Exit.void);
+        yield* Scope.close(entry.cellScope, Exit.void);
         expect(cleaned).toBe(true);
+      }),
+    ));
+
+  it("instanceScope 는 cellScope 의 child — cellScope close 시 자동 cleanup (ADR-035)", () =>
+    run(
+      Effect.gen(function* () {
+        let instanceCleaned = false;
+        const path = ActorPath.root("demo");
+        const entry = yield* ActorEntry.create<string>({ path, uid: "u" });
+
+        const inst = yield* STM.commit(TRef.get(entry.instanceScope));
+        yield* Scope.addFinalizer(
+          inst,
+          Effect.sync(() => {
+            instanceCleaned = true;
+          }),
+        );
+
+        // cellScope close 만 → instanceScope 도 자동
+        yield* Scope.close(entry.cellScope, Exit.void);
+        expect(instanceCleaned).toBe(true);
+      }),
+    ));
+
+  it("instanceScope 는 TRef — restart 시 새 scope 로 교체 가능 (ADR-035)", () =>
+    run(
+      Effect.gen(function* () {
+        const path = ActorPath.root("demo");
+        const entry = yield* ActorEntry.create<string>({ path, uid: "u" });
+
+        const oldInst = yield* STM.commit(TRef.get(entry.instanceScope));
+        yield* Scope.close(oldInst, Exit.void);
+
+        // 새 child scope 만들어서 교체
+        const newInst = yield* Scope.fork(
+          entry.cellScope,
+          ExecutionStrategy.sequential,
+        );
+        yield* STM.commit(TRef.set(entry.instanceScope, newInst));
+
+        const stored = yield* STM.commit(TRef.get(entry.instanceScope));
+        expect(stored).toBe(newInst);
+
+        yield* Scope.close(entry.cellScope, Exit.void);
       }),
     ));
 });

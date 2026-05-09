@@ -16,7 +16,7 @@
 | M2. Lifecycle | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook (자동 + 외부 emit). 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계. |
 | M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
-| M4. Restart | ⚪ 대기 | Supervision strategies (resume/restart/stop) |
+| M4. Restart | 🟡 진행 중 | Supervision (resume/restart/stop). 사이클 1~4 + 사이클 5 examples/05 동작. 154 테스트. _M4 끝 도그푸딩 대기 → 환류 fix 후 🟢._ |
 | M5. 고급 기능 | ⚪ 대기 | Backoff / withLimit / Stash / Timer |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
 
@@ -198,8 +198,14 @@
 - PreRestart 처리 도중 재실패 → 정책 재적용 (강도 제한)
 
 **마일스톤 완료 조건 (DoD):**
-- [ ] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증
-- [ ] **M4 끝 도그푸딩 (~1주, ADR-024)** — supervision 의미 검증.
+- [x] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증 ✅ (사이클 5)
+- [ ] **M4 끝 도그푸딩 (~1주, ADR-024)** — supervision 의미 검증. _사용자 진행 대기._
+
+**사이클 5 발견 의제 (도그푸딩 입력 후보, 같은 패밀리 = stop/cleanup 경로 정합성):**
+- Supervisor stop 강등 시 PostStop hook 안 호출 (자발 Stopped 흐름 거치지 않아 skip).
+- 자발 Stopped 시 watcher 알림 안 감 (현재 stopActor 만 알림).
+- PreRestart 처리 도중 fail = 단순 stop 강등 (재귀 supervision 없음, M5 withLimit).
+- → ADR-037 (가칭 _stop/cleanup 경로 통일_) 후보.
 
 ---
 
