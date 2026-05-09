@@ -14,6 +14,8 @@ import { ActorRef } from "../src/ref.js";
 import { Signal } from "../src/signal.js";
 import {
   stubAsk,
+  stubFork,
+  stubScheduleOnce,
   stubSpawn,
   stubStop,
   stubSystem,
@@ -41,6 +43,8 @@ const makeCtx = <Msg>() =>
       unwatch: stubUnwatch,
       watchTerminated: stubWatchTerminated,
       ask: stubAsk,
+      fork: stubFork,
+      scheduleOnce: stubScheduleOnce,
     });
   });
 
@@ -189,6 +193,8 @@ const makeEntryAndCtx = <Msg>(uid: string = "u") =>
       unwatch: stubUnwatch,
       watchTerminated: stubWatchTerminated,
       ask: stubAsk,
+      fork: stubFork,
+      scheduleOnce: stubScheduleOnce,
     });
     return { entry, ctx };
   });

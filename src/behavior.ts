@@ -1,4 +1,4 @@
-import type { Effect } from "effect";
+import { Effect } from "effect";
 import type { ActorContext } from "./context.js";
 import { MailboxPolicy } from "./mailbox.js";
 import type { Signal } from "./signal.js";
@@ -7,6 +7,7 @@ import type {
   Strategy,
   SupervisorRule,
 } from "./supervision.js";
+import { makeTimers, type Timers } from "./timers.js";
 
 // Behavior<Msg> ADT — 액터의 _다음 동작_ 을 표현하는 불변 값.
 // 사이클 2: ADT + 빌더 + 메타 추출 (sync 부분). 해석기는 사이클 3.
@@ -116,6 +117,23 @@ export const Behaviors = {
   // unwrapMeta 가 rules 추출 → interpreter 의 catchAllCause 가 사이클 2/3 에서 사용.
   supervise: <Msg>(inner: Behavior<Msg>): SupervisedBehavior<Msg> =>
     makeSupervise(inner, []),
+
+  // M5 사이클 3 (ADR-039): Behaviors.withTimers — setup 위 헬퍼.
+  // ctx.fork 안 instance scope 에 timer fiber 등록. restart 시 instanceScope close → 자동 cancel + 새 setup 에서 새 timers 등록.
+  // 새 ADT 노드 X — interpreter / unwrapMeta 변경 X. 표면만 추가.
+  withTimers: <Msg>(
+    f: (timers: Timers<Msg>) => BehaviorEffect<Msg>,
+  ): Behavior<Msg> => ({
+    _tag: "Setup",
+    init: (ctx) =>
+      Effect.flatMap(
+        makeTimers<Msg>({
+          cell: ctx.self.cell,
+          forkInInstanceScope: ctx.fork,
+        }),
+        f,
+      ),
+  }),
 };
 
 // 메타 추출 결과 (ADR-026/034, ARCHITECTURE.md §3.1 의 0단계 sync 부분).

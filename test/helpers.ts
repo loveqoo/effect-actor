@@ -1,4 +1,4 @@
-import { Effect, type Duration } from "effect";
+import { Effect, type Duration, type Fiber } from "effect";
 import type { Behavior } from "../src/behavior.js";
 import type { AskTimeout } from "../src/errors.js";
 import type { ActorRef, ActorSystemHandle } from "../src/ref.js";
@@ -42,3 +42,14 @@ export const stubAsk = <TargetMsg, Resp>(
   _make: (replyTo: ActorRef<Resp>) => TargetMsg,
   _timeout: Duration.DurationInput,
 ): Effect.Effect<Resp, AskTimeout> => Effect.die("stub ask invoked in unit test");
+
+export const stubFork = <A, E>(
+  _eff: Effect.Effect<A, E>,
+): Effect.Effect<Fiber.RuntimeFiber<A, E>> =>
+  Effect.die("stub fork invoked in unit test");
+
+export const stubScheduleOnce = <M>(
+  _delay: Duration.DurationInput,
+  _target: ActorRef<M>,
+  _msg: M,
+): Effect.Effect<void> => Effect.void;

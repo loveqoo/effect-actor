@@ -6,6 +6,8 @@ import { ActorRef } from "../src/ref.js";
 import { ActorContext } from "../src/context.js";
 import {
   stubAsk,
+  stubFork,
+  stubScheduleOnce,
   stubSpawn,
   stubStop,
   stubSystem,
@@ -40,6 +42,8 @@ describe("ActorContext.make", () => {
           unwatch: stubUnwatch,
           watchTerminated: stubWatchTerminated,
           ask: stubAsk,
+          fork: stubFork,
+          scheduleOnce: stubScheduleOnce,
         });
         expect(ctx.self).toBe(self);
         expect(ctx.system).toBe(stubSystem);

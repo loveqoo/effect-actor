@@ -306,14 +306,14 @@ Supervision strategy 가 restart 로 결정된 경우:
 
 각 자원이 _어느 Scope_ 에 묶이는지 명시. 자원 추가 시 이 표를 갱신.
 
-| 자원 | 소유 Scope | restart 시 |
-|---|---|---|
-| 자식 actor | _자기 instance Scope_ (부모 Scope 아님) | 부모 cascade stop 정책에 따라 stop (Akka Typed 기본) |
-| `ctx.fork` fiber | 부모 instance Scope | 부모 restart 시 닫힘 |
-| Timer (M5: `ctx.scheduleOnce`, `withTimers`) | 부모 instance Scope | restart 시 닫힘 |
-| Ask 임시 actor | 자기 instance Scope (응답/타임아웃 후 stop) | 부모 restart 와 무관 (독립) |
-| Setup resource (`Effect.acquireRelease`) | instance Scope | restart 시 닫고 setup 재실행 |
-| Stash (M5) | instance Scope | restart 시 비워짐 |
+| 자원 | 소유 Scope | restart 시 | 자발 Stopped 시 |
+|---|---|---|---|
+| 자식 actor | _자기 instance Scope_ (부모 Scope 아님) | 부모 cascade stop 정책에 따라 stop (Akka Typed 기본) | 부모 cascade — _ADR-037 후속 의제_ |
+| `ctx.fork` fiber (M5 사이클 3, ADR-039) | 부모 instance Scope | restart 시 닫힘 (`restartCleanup`) | 닫힘 (M5 사이클 3 — `notifyWatchersOnSelfTermination` 가 instanceScope close) |
+| Timer (M5 사이클 3: `ctx.scheduleOnce`, `withTimers`) | 부모 instance Scope (ctx.fork 통로) | restart 시 닫힘 + 새 setup 에서 새로 등록 | 닫힘 (자동) |
+| Ask 임시 actor | 자기 instance Scope (응답/타임아웃 후 stop) | 부모 restart 와 무관 (독립) | 자기 stop |
+| Setup resource (`Effect.acquireRelease`) | instance Scope | restart 시 닫고 setup 재실행 | 닫힘 |
+| Stash (M5 사이클 4 예정) | instance Scope | restart 시 비워짐 | 비워짐 |
 
 **원칙:**
 - _기본 cleanup_ 은 instance Scope 의 자동 정리 (Effect.acquireRelease / fork 등 finalizer).

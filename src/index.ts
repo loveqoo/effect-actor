@@ -20,6 +20,7 @@ export {
   DeathPactException,
   IncarnationMismatch,
   MailboxFull,
+  RestartLimitExceeded,
 } from "./errors.js";
 
 // 내부 자료구조 (사용자 직접 접근은 거의 없음)
@@ -42,9 +43,22 @@ export type {
 export { Behaviors, unwrapMeta } from "./behavior.js";
 export { interpretStep, runInterpreter } from "./interpreter.js";
 
-// supervision (M4)
-export type { ErrorMatcher, Strategy, SupervisorRule } from "./supervision.js";
-export { pickStrategy, Strategies } from "./supervision.js";
+// supervision (M4 + M5 사이클 1+2)
+export type {
+  BackoffConfig,
+  ErrorMatcher,
+  RestartLimit,
+  Strategy,
+  SupervisorRule,
+} from "./supervision.js";
+export {
+  computeBackoffDelay,
+  pickStrategy,
+  Strategies,
+} from "./supervision.js";
+
+// timers (M5 사이클 3)
+export type { Timers } from "./timers.js";
 
 // system (사용자 entry point)
 export { ActorSystem } from "./system.js";

@@ -1233,6 +1233,102 @@ Behaviors.supervise(b)
 
 ---
 
+## ADR-039: Behaviors.withTimers + ctx.fork + ctx.scheduleOnce (M5 사이클 3)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M5 사이클 3 — Akka Typed 의 `Behaviors.withTimers` + `TimerScheduler` + `ctx.scheduleOnce` 매핑 + ctx.fork 표면 도입
+
+### 맥락
+M5 사이클 1+2 에서 supervision (한도 + backoff) 끝남. 사이클 3 의 거리:
+
+1. **`Behaviors.withTimers` 의 ADT 형태** — option A: 새 ADT 노드 (`WithTimers`) + `unwrapMeta` + `interpreter` 분기, option B: setup 위 헬퍼 (새 ADT 노드 X).
+2. **timer fiber 의 lifetime** — entry 의 instanceScope (ADR-021 의 _restart 시 닫힘_) 가 자연스러운 owner. 사용자 직접 `ctx.fork` 표면도 같은 scope.
+3. **자발 Stopped 시 instanceScope cleanup** — ADR-035 / ADR-037 후속 의제로 미뤄놓은 것 중 _instanceScope 누수_ 부분이 사이클 3 의 _stop 시 timer 자동 cancel_ 검증으로 자연 노출. 부분 fix 가 사이클 3 안.
+4. **`evaluateInitial` 의 setup chain 처리** — `withTimers` 가 setup-like (option B 채택 시) 라 `setup → setup` chain. 기존 evaluateInitial 은 한 번만 풀음 → loop 형태 변경 필요.
+
+### 결정
+
+**A. `Behaviors.withTimers` = setup 위 헬퍼 (option B).**
+
+```ts
+withTimers: <Msg>(
+  f: (timers: Timers<Msg>) => BehaviorEffect<Msg>,
+): Behavior<Msg> => ({
+  _tag: "Setup",
+  init: (ctx) =>
+    Effect.flatMap(
+      makeTimers<Msg>({
+        cell: ctx.self.cell,
+        forkInInstanceScope: ctx.fork,
+      }),
+      f,
+    ),
+}),
+```
+
+새 ADT 노드 X — `unwrapMeta` / interpreter 분기 변경 X. 표면만 추가. Akka 의 `Behaviors.withTimers((timers) => ...)` 모양 동일.
+
+이유:
+- (+) ADT 단순. 새 종류 늘어나면 _모든_ 분기 (interpreter, unwrapMeta, Behavior union) 수정 필요 — option B 는 이 비용 회피.
+- (+) `withStash` (사이클 4) 도 같은 패턴 가능 — 일관 표면.
+- (-) `unwrapMeta` 가 _timer 사용 여부_ 추출 못함. 그러나 timer 는 _런타임_ 에 setup init 안에서 만들어지므로 _spawn 0단계_ 에 알 필요 없음. 자연스러움.
+
+**B. `ctx.fork(eff): Effect<RuntimeFiber>` + `ctx.scheduleOnce(delay, target, msg): Effect<void>` 표면 도입.**
+
+```ts
+readonly fork: <A, E>(
+  eff: Effect.Effect<A, E>,
+) => Effect.Effect<Fiber.RuntimeFiber<A, E>>;
+
+readonly scheduleOnce: <M>(
+  delay: Duration.DurationInput,
+  target: ActorRef<M>,
+  msg: M,
+) => Effect.Effect<void>;
+```
+
+`fork` 는 _entry.instanceScope 에 fork_ — restart/stop 시 자동 interrupt. 사용자가 직접 timer/loop 만들거나 streams 처리할 때 사용.
+
+`scheduleOnce` 는 `fork(sleep + target.tell)` 의 헬퍼. Akka 의 `ctx.scheduleOnce` 와 동등.
+
+내부적으로 `withTimers` 도 이 fork 사용 — _단일 통로_ 로 instanceScope 관리.
+
+**C. `evaluateInitial` 의 setup chain loop 처리.**
+
+`withTimers` 가 setup-like 라 사용자 코드:
+```ts
+Behaviors.setup((ctx) => Effect.sync(() => 
+  Behaviors.withTimers((timers) => ...)
+))
+```
+는 _setup → setup_ chain. 기존 `evaluateInitial` 은 한 번만 풀음 → `withTimers` 의 init 호출 안 됨 = timer 등록 X.
+
+변경: `while (cur._tag === "Setup") { cur = yield* cur.init(ctx); }` loop. 사용자가 무한 setup 만들면 무한 loop — 사용자 책임 (Akka 도 같음).
+
+회귀 안전 — 기존 setup 은 Setup 이외 (Receive/Stopped/Same) 반환하면 loop 즉시 끝.
+
+**D. 자발 Stopped 시 `notifyWatchersOnSelfTermination` 가 instanceScope close.**
+
+- 자발 Stopped 흐름은 _자기 fiber 가 자기 cleanup 호출_. 자기 fiber 는 cellScope 안 → 자기 instanceScope close 해도 자기는 안 다침 (instanceScope 의 fork 들만 interrupt).
+- ADR-035 의 _자발 Stopped 후 instanceScope 누수_ 의제 부분 fix. cellScope 누수 + 자식 cascade 는 그대로 ADR-037 후속 의제.
+- ADR-039 가 _timer 의 자동 cleanup 보장_ 을 약속하기 위해 필요.
+
+### 결과
+- (+) Akka 표면 그대로 — 마이그레이션 친숙.
+- (+) `ctx.fork` 가 _instance scope 의 단일 통로_ — `withTimers` / `scheduleOnce` / 사용자 직접 fork 모두 같은 lifecycle.
+- (+) restart/stop 시 timer 자동 cleanup — 사용자 의식 X.
+- (+) ADT 변경 X — `withTimers` 가 setup 위 헬퍼. `withStash` (사이클 4) 도 같은 패턴.
+- (+) ADR-035/037 후속 의제의 _instanceScope 누수_ 부분 자연 fix.
+- (-) `unwrapMeta` 가 _timer 사용 여부_ 추출 못함 — spawn 단계에 사전 정보 X. 그러나 timer 는 런타임 자원이라 의미 없음.
+- (-) `evaluateInitial` 의 setup 무한 loop 위험 — 사용자 책임. Akka 도 같음.
+
+### 후속 (M5+)
+- `Behaviors.withStash` (사이클 4) 도 같은 setup 위 헬퍼 패턴.
+- `startTimerAtFixedRate` (Akka 별도) — fixedDelay 와 의미 다름 (offer 시점 고정 vs 간격). 도그푸딩 입력 후 결정.
+- `ctx.fork` 의 fail/defect 전파 정책 — 현재 fire-and-forget, fail 시 silent. supervision 통합은 _복잡_ — 별도 ADR 필요 시.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

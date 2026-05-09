@@ -17,7 +17,7 @@
 | M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
-| M5. 고급 기능 | 🟡 진행 중 | Backoff / withLimit / Stash / Timer. 사이클 1+2 완료 (`restart.withLimit` ADR-037 + `restartWithBackoff` ADR-038). 182 테스트. |
+| M5. 고급 기능 | 🟡 진행 중 | Backoff / withLimit / Stash / Timer. 사이클 1~3 완료 (`restart.withLimit` ADR-037 + `restartWithBackoff` ADR-038 + `withTimers`/`ctx.fork`/`scheduleOnce` ADR-039). 191 테스트. |
 | M∞. 본격 도그푸딩 + 출시 | ⚪ 대기 | poly-phony 본격 사용 → npm publish |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
@@ -252,6 +252,7 @@
 **완료된 사이클:**
 - 🟢 사이클 1 — `Strategies.restart.withLimit({ maxNrOfRetries, withinTimeRange })` + 의제 3 (PreRestart 재실패 → stop 강등) 통합. ADR-037 박음. `RestartLimitExceeded` tagged error 추가. 누적 169 테스트, 5회 flake-free.
 - 🟢 사이클 2 — `Strategies.restartWithBackoff({ minBackoff, maxBackoff, randomFactor })` + `.withLimit` chain. `messageLoop` restart 분기에 backoff sleep 단계 추가. `restartHistory` 카운터를 한도 + backoff 둘 다 공유. ADR-038. 누적 182 테스트, 5회 flake-free.
+- 🟢 사이클 3 — `Behaviors.withTimers` (setup 위 헬퍼) + `ctx.fork` (instance scope 안 fork) + `ctx.scheduleOnce`. `Timers` 인터페이스 (startSingle/FixedDelay/cancel/cancelAll/isActive). `evaluateInitial` setup chain loop. `notifyWatchersOnSelfTermination` 의 instanceScope close (자발 Stopped 시 timer 자동 cleanup). ADR-039. 누적 191 테스트, 5회 flake-free.
 
 ---
 

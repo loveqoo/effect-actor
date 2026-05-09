@@ -180,12 +180,33 @@ const makeChildContext = <Msg>(
       make: (replyTo: ActorRef<Resp>) => TargetMsg,
       timeout: Duration.DurationInput,
     ) => askOther(spawnCtx, selfEntry, target, make, timeout),
+    // M5 사이클 3 (ADR-039): instance scope 안 fork.
+    // restart 시 instanceScope close → fiber interrupt. stop 시 cellScope close → instanceScope cascade close.
+    fork: <A, E>(eff: Effect.Effect<A, E>) =>
+      Effect.gen(function* () {
+        const inst = yield* STM.commit(TRef.get(selfEntry.instanceScope));
+        return yield* Effect.forkIn(eff, inst);
+      }),
+    scheduleOnce: <M>(
+      delay: Duration.DurationInput,
+      target: ActorRef<M>,
+      msg: M,
+    ) =>
+      Effect.gen(function* () {
+        const inst = yield* STM.commit(TRef.get(selfEntry.instanceScope));
+        yield* Effect.forkIn(
+          Effect.sleep(delay).pipe(Effect.flatMap(() => target.tell(msg))),
+          inst,
+        );
+      }),
   });
 
 // notifyWatchersOnSelfTermination — 자발 Stopped / supervisor stop 강등 시 messageLoop 가 호출 (M4.1 사이클 2).
-// stopActor 의 _watchers 알림 + registry unregister + parent.children 갱신_ 부분만 추출.
+// stopActor 의 _watchers 알림 + registry unregister + parent.children 갱신_ 부분 + instanceScope close (M5 사이클 3).
 // cellScope close 는 _안 함_ — 자기 fiber 가 자기 scope 닫으면 self-interrupt 위험. cellScope 는
 // 사용자가 sys.shutdown 또는 ctx.stop 호출 시 정리 (자발 stop 후 cellScope 누수는 별도 의제 — ADR-037 후보).
+// instanceScope close — 자기 fiber 가 자기 instanceScope 안 fork (timer/scheduleOnce/사용자 fork) 모두 cancel.
+// 자기 fiber (interpreter) 는 cellScope 안이라 영향 X. ADR-039 의 _자동 cleanup_ 보장.
 // F1 fix 의 status check 로 죽어가는 watcher skip 그대로.
 const notifyWatchersOnSelfTermination = <Msg>(
   registry: RegistryT,
@@ -245,6 +266,11 @@ const notifyWatchersOnSelfTermination = <Msg>(
         }
       }),
     );
+
+    // M5 사이클 3 (ADR-039): instanceScope close — 사용자 fork/timer 모두 자동 cancel.
+    // 자기 fiber (interpreter) 는 cellScope 라 영향 X. cellScope 는 별도 — sys.shutdown 또는 ctx.stop 시.
+    const inst = yield* STM.commit(TRef.get(entry.instanceScope));
+    yield* Scope.close(inst, Exit.void);
   });
 
 // restartCleanup — Restart strategy 발동 시 messageLoop 의 onRestart 콜백 (ADR-020/035, M4 사이클 3).

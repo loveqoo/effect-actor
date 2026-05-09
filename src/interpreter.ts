@@ -72,16 +72,20 @@ export const interpretSignalStep = <Msg>(
   return Effect.succeed(current);
 };
 
-// Setup 을 평가해 시작 behavior 를 얻는다 (init 한 번만 실행).
+// Setup 을 평가해 시작 behavior 를 얻는다.
+// M5 사이클 3 (ADR-039): _setup chain_ 모두 풀음 — Behaviors.withTimers 가 setup 위 헬퍼라 setup → setup 반환.
+// 사용자가 직접 setup 안 setup 도 가능 (Akka 동일). Behaviors.same/stopped/receive 등 비-Setup 반환 시 종료.
 const evaluateInitial = <Msg>(
   initial: Behavior<Msg>,
   ctx: ActorContext<Msg>,
-): BehaviorEffect<Msg> => {
-  if (initial._tag === "Setup") {
-    return initial.init(ctx);
-  }
-  return Effect.succeed(initial);
-};
+): BehaviorEffect<Msg> =>
+  Effect.gen(function* () {
+    let cur = initial;
+    while (cur._tag === "Setup") {
+      cur = yield* cur.init(ctx);
+    }
+    return cur;
+  });
 
 type Inbox<Msg> =
   | { readonly _tag: "Sig"; readonly signal: Signal }

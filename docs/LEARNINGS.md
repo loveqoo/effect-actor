@@ -559,3 +559,16 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [test] 9 테스트 추가 (총 182): 단위 4 (`Strategies.restart.backoff` 기본 null / `restartWithBackoff` 빌더 + 옵셔널 randomFactor / `.withLimit` chain) + `computeBackoffDelay` 단위 4 (attemptIndex 0/1/cap, jitter 범위) + 통합 5 (backoff 점진 증가, cap, mailbox 보존, withLimit chain stop 강등, 사이클 1 회귀). 5회 flake-free.
 - [process] 통합 테스트 시간 측정 (`Date.now()`) 의 정확도 — 60ms / 140ms 같은 _최소_ 임계값 사용. 정확한 비교 (예: ±5ms) 는 환경별 flake 위험. _최소만_ 검증이 안전.
 - [insight] **사이클 1 → 2 의 자연스러운 확장.** 사이클 1 의 `pendingRestartLimit` 옆에 `pendingRestartBackoff` 추가, restart 분기 한 군데에 sleep 단계 추가 — 두 fix 모두 _기존 코드 경로_ 위에 얹힘. ADR-037 의 _stop/cleanup 통일_ + ADR-038 의 _restart-cleanup-backoff 통일_ 모두 같은 가족. _아키텍처가 점진 확장 친화_ 라는 또 다른 사례.
+
+
+
+### 2026-05-09 — M5 사이클 3 (withTimers + ctx.fork + scheduleOnce, ADR-039)
+
+- [design] **`Behaviors.withTimers` = setup 위 헬퍼 (option B).** 새 ADT 노드 (`WithTimers`) 추가 안 함. `withTimers` 가 `{ _tag: "Setup", init: (ctx) => Effect.flatMap(makeTimers(ctx), f) }` 반환. 이유: ADT 종류 늘리면 _모든 분기_ (interpreter / unwrapMeta / Behavior union) 수정 — option B 가 비용 회피. 사이클 4 의 `withStash` 도 같은 패턴 갈 수 있음.
+- [design] **`ctx.fork` + `ctx.scheduleOnce` 표면 도입.** instance scope 안 fork 의 _단일 통로_. `withTimers` 도 내부적으로 이 fork 사용 — 사용자 fork 와 timer fork 가 _같은 lifecycle_. ADR-021 의 _Timer / fork 모두 instance Scope_ 약속 그대로 구현.
+- [bug+fix] **`evaluateInitial` setup chain 미처리.** `withTimers` 가 setup 위 헬퍼라 `setup → withTimers (= setup)` chain. 기존 `evaluateInitial` 은 한 번만 풀음 → withTimers init 호출 안 됨 = timer 등록 X. 통합 테스트 _restart 시 timer cleanup_ 가 즉시 잡음. fix: `while (cur._tag === "Setup") { cur = yield* cur.init(ctx); }` loop. 회귀 안전 — 기존 setup 은 비-Setup 반환하면 즉시 끝. 사용자가 무한 setup 만들면 무한 loop (Akka 도 같음).
+- [bug+fix] **`notifyWatchersOnSelfTermination` 가 instanceScope close 안 함.** ADR-035 의 _자발 Stopped 후 cleanup 누수_ 의제 일부. ctx.fork 자동 interrupt 검증이 즉시 노출. fix: `notifyWatchersOnSelfTermination` 끝에 `Scope.close(instanceScope)` 추가. 자기 fiber (interpreter) 는 cellScope 라 영향 X — _자기가 자기 instanceScope_ 닫는 건 안전 (instanceScope 의 _fork 들만_ interrupt). cellScope + 자식 cascade 누수는 그대로 ADR-037 후속 의제.
+- [insight] **사이클 3 가 ADR-035/037 후속 의제의 _부분_ 을 자연 fix.** `instanceScope 누수` (M4 사이클 5 의제 중 하나) 가 _timer 의 자동 cleanup 보장_ 검증으로 자연 노출 → 작은 fix (한 줄 close). cellScope 누수 + 자식 cascade 는 본격 도그푸딩 표면 빈도 보고 별도. _큰 의제 패밀리는 사이클별로 자연스럽게 풀림_ 패턴 또 한 번.
+- [test] 9 테스트 추가 (총 191): startSingleTimer / fixedDelay / cancel / cancelAll / isActive / key 충돌 대체 / scheduleOnce / ctx.fork stop 자동 interrupt / restart 시 timer cleanup. 모두 통합 (Effect runtime + 시간 측정). 5회 flake-free. 시간 측정은 _최소 임계값_ (예: `> 5`) 만 사용 — 환경별 flake 방지.
+- [process] 표면 추가가 stub helpers (test/helpers.ts) 에도 영향 — `stubFork` + `stubScheduleOnce` 추가. context.test.ts + interpreter.test.ts 의 `ActorContext.make` 호출에도 새 파라미터. 기존 코드 변경 비용 명시 — _단위 테스트의 stub 완전성_ 을 신호로 보면 ADT 변경 비용 측정 가능.
+- [process] timers.ts 의 `key → fiber` 추적 자료구조 — `TRef<HashMap<string, Fiber>>` 로 STM 안에서 idempotent 갱신 (replaceFiber 의 atomic interrupt-then-set). cell 외부 자료구조라 STM 단독 OK.

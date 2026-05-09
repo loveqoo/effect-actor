@@ -1695,3 +1695,342 @@ describe("M5 사이클 2 — restartWithBackoff (ADR-038)", () => {
       }),
     ));
 });
+
+describe("M5 사이클 3 — Behaviors.withTimers + ctx.fork + ctx.scheduleOnce (ADR-039)", () => {
+  it("startSingleTimer — delay 후 _self mailbox_ 에 메시지 도착 + 핸들러 호출", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+        const root = Behaviors.withTimers<string>((timers) =>
+          Effect.gen(function* () {
+            yield* timers.startSingleTimer("once", "ping", "80 millis");
+            return Behaviors.receiveMessage<string>((m) =>
+              Effect.sync(() => {
+                seen.push(m);
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<string>(root, "demo");
+        yield* Effect.sleep("200 millis");
+        expect(seen).toEqual(["ping"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("startTimerWithFixedDelay — interval 마다 self 메시지", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+        const root = Behaviors.withTimers<string>((timers) =>
+          Effect.gen(function* () {
+            yield* timers.startTimerWithFixedDelay(
+              "tick",
+              "tick!",
+              "60 millis",
+            );
+            return Behaviors.receiveMessage<string>((m) =>
+              Effect.sync(() => {
+                seen.push(m);
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<string>(root, "demo");
+        yield* Effect.sleep("260 millis"); // 60ms 간격 → 약 4회 가능 (첫 발사 60ms 후)
+        expect(seen.length).toBeGreaterThanOrEqual(3);
+        expect(seen.every((m) => m === "tick!")).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("Timers.cancel(key) — 취소 후 메시지 도착 X", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+
+        type Msg = { readonly _tag: "Cancel" } | { readonly _tag: "Tick" };
+
+        const root = Behaviors.withTimers<Msg>((timers) =>
+          Effect.gen(function* () {
+            yield* timers.startTimerWithFixedDelay(
+              "tick",
+              { _tag: "Tick" },
+              "50 millis",
+            );
+            return Behaviors.receiveMessage<Msg>((m) =>
+              Effect.gen(function* () {
+                if (m._tag === "Cancel") {
+                  yield* timers.cancel("tick");
+                } else {
+                  seen.push("tick");
+                }
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("130 millis"); // ~2회 발사
+        const beforeCancel = seen.length;
+        yield* sys.root.tell({ _tag: "Cancel" });
+        yield* Effect.sleep("200 millis");
+        expect(seen.length).toBe(beforeCancel); // 취소 후 증가 X
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("Timers.cancelAll — 모든 timer 취소", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+
+        type Msg =
+          | { readonly _tag: "CancelAll" }
+          | { readonly _tag: "T1" }
+          | { readonly _tag: "T2" };
+
+        const root = Behaviors.withTimers<Msg>((timers) =>
+          Effect.gen(function* () {
+            yield* timers.startTimerWithFixedDelay(
+              "t1",
+              { _tag: "T1" },
+              "50 millis",
+            );
+            yield* timers.startTimerWithFixedDelay(
+              "t2",
+              { _tag: "T2" },
+              "50 millis",
+            );
+            return Behaviors.receiveMessage<Msg>((m) =>
+              Effect.gen(function* () {
+                if (m._tag === "CancelAll") {
+                  yield* timers.cancelAll;
+                } else {
+                  seen.push(m._tag);
+                }
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("120 millis");
+        yield* sys.root.tell({ _tag: "CancelAll" });
+        const before = seen.length;
+        yield* Effect.sleep("200 millis");
+        expect(seen.length).toBe(before);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("Timers.isActive — start 후 true, cancel 후 false", () =>
+    run(
+      Effect.gen(function* () {
+        let beforeStart = false;
+        let afterStart = false;
+        let afterCancel = false;
+
+        type Msg = { readonly _tag: "Check" };
+
+        const root = Behaviors.withTimers<Msg>((timers) =>
+          Effect.gen(function* () {
+            beforeStart = yield* timers.isActive("k");
+            yield* timers.startSingleTimer("k", { _tag: "Check" }, "10 seconds");
+            afterStart = yield* timers.isActive("k");
+            yield* timers.cancel("k");
+            afterCancel = yield* timers.isActive("k");
+            return Behaviors.receiveMessage<Msg>((_m) =>
+              Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("50 millis");
+
+        expect(beforeStart).toBe(false);
+        expect(afterStart).toBe(true);
+        expect(afterCancel).toBe(false);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("startSingleTimer — 같은 key 다시 호출 시 기존 timer 대체 (cancel)", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+
+        type Msg =
+          | { readonly _tag: "Replace" }
+          | { readonly _tag: "First" }
+          | { readonly _tag: "Second" };
+
+        const root = Behaviors.withTimers<Msg>((timers) =>
+          Effect.gen(function* () {
+            yield* timers.startSingleTimer(
+              "k",
+              { _tag: "First" },
+              "300 millis",
+            );
+            return Behaviors.receiveMessage<Msg>((m) =>
+              Effect.gen(function* () {
+                if (m._tag === "Replace") {
+                  yield* timers.startSingleTimer(
+                    "k",
+                    { _tag: "Second" },
+                    "80 millis",
+                  );
+                } else {
+                  seen.push(m._tag);
+                }
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("50 millis"); // First 도 안 발사
+        yield* sys.root.tell({ _tag: "Replace" }); // First cancel + Second start
+        yield* Effect.sleep("250 millis"); // Second 발사 (~80ms 후), First 시점 (300ms) 도 지남
+
+        // First 가 발사되지 않아야 — Replace 가 cancel
+        expect(seen).toEqual(["Second"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("ctx.scheduleOnce(delay, target, msg) — 다른 액터에 delayed tell", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+
+        const child = Behaviors.receiveMessage<string>((m) =>
+          Effect.sync(() => {
+            seen.push(m);
+            return Behaviors.same();
+          }),
+        );
+
+        type RootMsg = { readonly _tag: "Setup" };
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(child, "kid");
+            yield* ctx.scheduleOnce("60 millis", c, "delayed-hello");
+            return Behaviors.receiveMessage<RootMsg>((_m) =>
+              Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* Effect.sleep("160 millis");
+        expect(seen).toEqual(["delayed-hello"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("ctx.fork — instance scope 안 fork, 액터 stop 시 자동 interrupt", () =>
+    run(
+      Effect.gen(function* () {
+        let tickCount = 0;
+
+        type Msg = { readonly _tag: "Done" };
+        const root = Behaviors.setup<Msg>((ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.fork(
+              Effect.forever(
+                Effect.sync(() => {
+                  tickCount++;
+                }).pipe(Effect.flatMap(() => Effect.sleep("5 millis"))),
+              ),
+            );
+            return Behaviors.receiveMessage<Msg>((_m) =>
+              Effect.succeed(Behaviors.stopped()),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(root, "demo");
+        yield* Effect.sleep("80 millis");
+        const beforeStop = tickCount;
+        expect(beforeStop).toBeGreaterThan(5);
+
+        yield* sys.root.tell({ _tag: "Done" }); // stop
+        yield* Effect.sleep("100 millis");
+        const afterStopOnce = tickCount;
+        yield* Effect.sleep("100 millis");
+        const afterStopTwice = tickCount;
+        // stop 후 fork 가 interrupt — count 증가 X (또는 1~2 수준 잔여)
+        expect(afterStopTwice).toBe(afterStopOnce);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("restart 시 timer 자동 cleanup — 기존 fixedDelay interrupt, 새 timer 만 발사", () =>
+    run(
+      Effect.gen(function* () {
+        let tickCount = 0;
+        let setupCount = 0;
+
+        type Msg = { readonly _tag: "Boom" } | { readonly _tag: "Tick" };
+
+        const inner = Behaviors.setup<Msg>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.withTimers<Msg>((timers) =>
+              Effect.gen(function* () {
+                yield* timers.startTimerWithFixedDelay(
+                  "tick",
+                  { _tag: "Tick" },
+                  "50 millis",
+                );
+                return Behaviors.receiveMessage<Msg>((m) =>
+                  Effect.sync(() => {
+                    if (m._tag === "Boom") throw new Error("boom");
+                    tickCount++;
+                    return Behaviors.same();
+                  }),
+                );
+              }),
+            );
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchAll,
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<Msg>(supervised, "demo");
+        yield* Effect.sleep("160 millis"); // ~3회 발사
+        const beforeRestart = tickCount;
+        expect(beforeRestart).toBeGreaterThan(1);
+
+        yield* sys.root.tell({ _tag: "Boom" });
+        yield* Effect.sleep("160 millis"); // restart 후 새 timer 발사
+
+        // setup 두 번 호출 — restart 검증
+        expect(setupCount).toBe(2);
+        // restart 후 새 timer 가 살아있어 카운트 더 증가
+        expect(tickCount).toBeGreaterThan(beforeRestart);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});
