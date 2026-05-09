@@ -344,3 +344,21 @@
 - [process] **세 발견 의제는 같은 패밀리** — _stop/cleanup 흐름의 여러 경로 정합성_. 자발 Stopped / 외부 ctx.stop / supervisor stop 강등 / supervisor restart — 각 경로의 PostStop / watcher / Scope cleanup / fiber 종료 약속이 통일되지 않음. M4 끝 도그푸딩 + ADR-037 (가칭 _stop 경로 통일_) 후보.
 - [process] DoD 부분 체크 — `examples/05` 항목 ✅. _M4 끝 도그푸딩 (~1주, ADR-024)_ 항목은 _사용자 진행 대기_ — M4 _전체_ DoD 확정은 도그푸딩 환류 fix 후 (M3 패턴과 동일).
 - [process] 도그푸딩 진행 방향 결정 — **poly-phony 측에서 직접** (M3 도그푸딩 #2 패턴 동일). 사이클 5 는 examples/05 + 발견 의제 정리로 닫고, 도그푸딩 입력 받으면 M4.도그푸딩 / M4.1 환류 fix 후속 사이클 진행 예정. 사이클 5 발견 3 의제 (supervisor stop PostStop / 자발 Stopped watcher / PreRestart 재실패) 도 poly-phony 사용 중 _실제 노출_ 되는지 확인 후 우선순위 정함.
+
+
+
+### 2026-05-09 — Effect TMap.remove/removeAll 버그 upstream 보고
+
+- [process] **사용자 비판적 의심으로 검증 깊이 ↑** — _"큰 라이브러리에서 이런 본체 버그가 살아있을 리가, 우리가 잘못 사용하고 있을 가능성 더 높다"_ 의 사용자 challenge 가 검증의 _발판_. 단순 코드 분석 → 격리 reproducer + 공식 가이드 + 시그너처 확인 + own test 분석까지 _깊이 있는 검증_ 으로 발전. 결과적으로 _진짜 본체 버그_ 확정 + upstream 보고 가치 ↑.
+- [process] **검증 단계** (참고용 — 다음 _본체 버그 의심_ 케이스 동일 패턴 사용 가능):
+  1. _격리 reproducer_ — 라이브러리 자체 API 만 사용, 우리 도메인 분리 (custom Hash 로 강제 충돌)
+  2. _최신 버전 확인_ — npm latest 가 우리 버전인지 (이미 fix 됐는데 우리만 오래됨 가능성 차단)
+  3. _공식 가이드 / 명세_ 확인 — 우리 사용 패턴 가이드와 일치하는지
+  4. _주변 함수 비교_ — 같은 자료구조 다루는 다른 함수의 구현이 일관된지 (set vs remove 의 비교 모양)
+  5. _own test 검사_ — upstream test 가 _이 케이스 다루는지_ (안 다루면 _2년 살아남은 이유_ 명확)
+  6. _GitHub issue/PR 검색_ — 이미 보고됐는지
+- [discovery] **확정된 사실**: Effect 3.21.2 (현재 npm latest) 의 `TMap.remove` / `removeAll` 는 `Chunk.partition` 결과 변수 (`[toRemove, toRetain]`) 를 시그너처 (`[excluded, satisfying]`) 와 거꾸로 바인드. 추가로 `remove` 는 predicate 자리에 `entry[1]` (value) 를 비교 — 두 번째 잘못. 결과: hash 충돌 bucket 통째 비움 + tSize 1 만 감소 = 데이터 corruption (size != 실제 entry 수).
+- [discovery] **2년 살아남은 이유**: Effect own test (`TMap.test.ts`) 가 짧은 varied 키 (`"a"`, `"b"`) 만 사용 → 다른 bucket 으로 분산 → bucket-wipe 안 일어남. STM 자체가 minor feature 라 community 노출 적음.
+- [process] **upstream issue 박음**: https://github.com/Effect-TS/effect/issues/6225 (제목 _"TMap.remove and removeAll incorrectly clear entire bucket on hash collision"_). 본문: 인사 + 격리 reproducer (custom Hash 강제 충돌, 도메인 중립) + 현재 코드 + 제안 fix patch. ~96 줄, 우리 도메인 흔적 0, attribution 없이 (commit 패턴과 일관).
+- [code] `src/registry.ts` + `src/entry.ts` 의 우회 주석에 issue link + 복원 조건 (_"위 issue fix 가 release 되면 TMap 직접 사용으로 swap 가능"_) 명시. fix release 되면 `TRef<HashMap>` → `TMap` 한 줄 swap 으로 복원.
+- [process] OSS 환류 의의 — ADR-028 의 _라이브러리 정통_ 정신 그대로. 우리 우회는 _임시_, upstream fix 후 정통 복원이 자연스러움. PR 까지는 안 보냈지만 (C 갈래) reproducer + fix patch 까지 포함해 maintainer 부담 최소화.

@@ -26,6 +26,7 @@ import type { ActorStatus } from "./status.js";
 // TMap.remove/removeAll 가 partition 술어를 잘못 다뤄 (registry.ts 주석 참고)
 // hash 충돌 bucket 의 다른 키들이 한꺼번에 사라진다. WatchKey 도 같은 prefix
 // path 를 공유해 충돌이 잦으므로 TRef<HashMap> 으로 우회.
+// upstream issue: https://github.com/Effect-TS/effect/issues/6225
 export interface ActorEntry<Msg> {
   readonly path: ActorPath;
   readonly uid: string;

@@ -11,6 +11,8 @@ import { ActorPath as ActorPathNs } from "./path.js";
 // 잘못 고른 버그(line 308/328: entry[1] 또는 toRetain 사용)가 있어 hash 충돌이 난
 // 같은 bucket 의 다른 엔트리까지 한꺼번에 사라진다. Registry 키들이 공통 prefix
 // (`actor://<system>/...`) 를 공유해 충돌이 흔하므로, TRef<HashMap> 으로 우회.
+// upstream issue: https://github.com/Effect-TS/effect/issues/6225
+// 복원 조건: 위 issue fix 가 release 되면 TMap 직접 사용으로 swap 가능.
 export interface Registry {
   readonly map: TRef.TRef<HashMap.HashMap<string, ActorEntry<unknown>>>;
 }
