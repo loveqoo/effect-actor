@@ -2270,3 +2270,162 @@ describe("M5 사이클 4 — Behaviors.withStash + StashOverflow (ADR-040)", () 
       }),
     ));
 });
+
+describe("M5 후속 — Effect 밖 throw 안전망 (makeReceive Effect.suspend wrap)", () => {
+  it("receiveMessage handler 가 _직접 throw_ → supervision restart 작동", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+        const seen: Array<string> = [];
+
+        const inner = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.receiveMessage<string>((m) => {
+              // _Effect 밖_ 직접 throw — Effect.suspend wrap 이 잡아 die 로 전환.
+              if (m === "boom") throw new Error("direct-throw");
+              seen.push(m);
+              return Effect.succeed(Behaviors.same());
+            });
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchAll,
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("a");
+        yield* sys.root.tell("boom"); // 직접 throw → restart
+        yield* sys.root.tell("b");
+        yield* Effect.sleep("80 millis");
+
+        expect(setupCount).toBeGreaterThanOrEqual(2); // restart 검증
+        expect(seen).toEqual(["a", "b"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("receive handler 가 _직접 throw_ → supervision 통과", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+
+        const inner = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.receive<string>((_c, m) => {
+              if (m === "boom") throw new Error("direct-throw");
+              return Effect.succeed(Behaviors.same());
+            });
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchAll,
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom");
+        yield* Effect.sleep("60 millis");
+
+        expect(setupCount).toBeGreaterThanOrEqual(2);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("receiveSignal handler 가 _직접 throw_ → supervision 통과 (PreRestart 재실패와 같은 경로)", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+
+        type RootMsg = { readonly _tag: "Setup" };
+        let childRef: ActorRef<string> | null = null;
+
+        const child = Behaviors.receive<string>((_c, _m) =>
+          Effect.die(new Error("trigger")),
+        ).receiveSignal((_c, sig) => {
+          // PreRestart 안 _직접 throw_ — Effect.suspend wrap 이 잡아 die.
+          if (sig._tag === "PreRestart") throw new Error("preRestart-throw");
+          if (sig._tag === "PostStop") events.push("child:postStop");
+          return Effect.succeed(Behaviors.same());
+        });
+
+        const supervised = Behaviors.supervise(child).onFailure(
+          Strategies.matchAll,
+          Strategies.restart,
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(supervised, "kid");
+            childRef = c;
+            return Behaviors.receive<RootMsg>((c2, _m) =>
+              Effect.gen(function* () {
+                yield* c2.watch(c);
+                yield* ctx.system.tell(c, "boom");
+                return Behaviors.same();
+              }),
+            ).receiveSignal((_c, sig) =>
+              Effect.sync(() => {
+                if (sig._tag === "Terminated")
+                  events.push("root:terminated");
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("100 millis");
+
+        // PreRestart 직접 throw → 의제 3 의 cleanup 통일 경로 → PostStop + watcher 알림
+        expect(events.filter((e) => e === "child:postStop").length).toBe(1);
+        expect(events.filter((e) => e === "root:terminated").length).toBe(1);
+
+        const resolved = yield* STM.commit(
+          Registry.resolve(sys.registry, childRef!.path),
+        );
+        expect(Option.isNone(resolved)).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("회귀 — Effect.sync 안 throw (기존 패턴) 그대로 동작", () =>
+    run(
+      Effect.gen(function* () {
+        let setupCount = 0;
+
+        const inner = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            setupCount++;
+            return Behaviors.receiveMessage<string>((m) =>
+              Effect.sync(() => {
+                if (m === "boom") throw new Error("sync-throw");
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const supervised = Behaviors.supervise(inner).onFailure(
+          Strategies.matchAll,
+          Strategies.restart,
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom");
+        yield* Effect.sleep("60 millis");
+
+        expect(setupCount).toBeGreaterThanOrEqual(2);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});

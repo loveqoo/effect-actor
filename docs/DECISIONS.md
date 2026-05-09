@@ -1401,9 +1401,14 @@ interpretStep 가 fail/die 면 unstashAll 의 generator 가 그대로 propagate.
 ### 부가 발견 — _Effect 밖 throw_ 가 supervision 통과 X (테스트 작성 중 노출)
 사이클 4 테스트 작성 중 `(m) => { if Boom throw }` 같은 _직접 throw_ 가 fiber die 로 propagate 되지 _않음_ 발견. handler 호출 _자체_ 가 throw → `interpretStep` 의 `Effect.map(handler(ctx, msg), ...)` 가 만들어지기 _전_ 에 throw → `messageLoop` 의 `Effect.exit(stepEffect)` 가 못 잡음.
 
-**현재 _공식_ 패턴**: 사용자가 `Effect.sync(() => { ... throw ... })` 또는 `Effect.suspend(() => ...)` 안에서 throw — 기존 supervision 테스트들 모두 이 패턴.
+**Resolved (2026-05-09, 미니 사이클)**: `interpretStep` / `interpretSignalStep` 안에서 handler/onSignal 호출을 `Effect.suspend(() => current.handle(ctx, msg))` 로 wrap. lazy thunk 가 throw 잡아 die 로 전환 → supervision 작동.
 
-**별도 fix 후보 (이 ADR 범위 밖)**: `receiveMessage` / `receive` 의 makeReceive 안에서 `Effect.suspend(() => handle(...))` 로 lazy thunk wrap. 사용자가 _직접 throw_ 도 잡힘. 단순 fix 1줄 — 별도 사이클에서 결정.
+- wrap 위치 = `interpreter.ts` 의 두 step 함수 (NOT `behavior.ts` 의 `makeReceive`). 이유: makeReceive 에 wrap 하면 `ReceiveBehavior.handle` / `onSignal` 의 _참조 동일성_ 깨짐 → 기존 behavior.test.ts 의 `expect(b.handle).toBe(handler)` 회귀 5건. `interpreter` 안 wrap 은 ADT 표면 보존 + 안전망만 추가 → 회귀 0.
+- 회귀 테스트 4 (system.test.ts 끝): receiveMessage 직접 throw / receive 직접 throw / receiveSignal 직접 throw (PreRestart 재실패 경로) / Effect.sync 패턴 회귀.
+- 사용자 표면 변경 X — 기존 `Effect.sync(() => throw)` 패턴 그대로 동작 + _직접 throw_ 도 잡힘. 사용자 학습 비용 0.
+- suspend 한 단계 lazy 비용 무시 가능 — 이미 messageLoop 가 step 단위 `Effect.exit` 함.
+
+201 테스트 (이전 197 + 회귀 4). 5회 flake-free.
 
 ---
 

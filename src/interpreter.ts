@@ -14,6 +14,8 @@ import { computeBackoffDelay, pickStrategy } from "./supervision.js";
 
 // 한 메시지를 한 Behavior 에 적용해 _다음_ Behavior 계산.
 // Setup/WithMailbox 는 spawn 0단계에서 풀려 도달 안 함 — 도달하면 invariant violation, 안전하게 그대로.
+// M5 후속 (ADR-040 후속): handler 호출을 Effect.suspend 로 wrap — 사용자가 _Effect 밖_ 직접 throw 해도
+// suspend lazy thunk 가 잡아 die 로 전환 → messageLoop 의 supervision 작동. ADT 표면 변경 X.
 export const interpretStep = <Msg>(
   current: Behavior<Msg>,
   ctx: ActorContext<Msg>,
@@ -26,8 +28,9 @@ export const interpretStep = <Msg>(
     case "Stopped":
       return Effect.succeed(current);
     case "Receive":
-      return Effect.map(current.handle(ctx, msg), (next) =>
-        next._tag === "Same" ? current : next,
+      return Effect.map(
+        Effect.suspend(() => current.handle(ctx, msg)),
+        (next) => (next._tag === "Same" ? current : next),
       );
     case "Setup":
     case "WithMailbox":
@@ -40,24 +43,29 @@ export const interpretStep = <Msg>(
 // 한 신호를 한 Behavior 에 적용해 _다음_ Behavior 계산.
 // M2 사이클 2: 기본 — onSignal 부착되면 호출, 미부착이면 current 그대로.
 // M3 사이클 5: DeathPact 검출 — Terminated 가 _처리 안 됨_ (미부착 또는 Unhandled) 이면 fail.
+// M5 후속 (ADR-040 후속): onSignal 호출도 Effect.suspend wrap (interpretStep 와 같은 안전망).
 export const interpretSignalStep = <Msg>(
   current: Behavior<Msg>,
   ctx: ActorContext<Msg>,
   signal: Signal,
 ): BehaviorEffect<Msg> => {
   if (current._tag === "Receive" && current.onSignal !== null) {
-    return Effect.flatMap(current.onSignal(ctx, signal), (next) => {
-      if (next._tag === "Unhandled" && signal._tag === "Terminated") {
-        return Effect.fail(
-          new DeathPactException({
-            self: ctx.self.path,
-            terminated: signal.path,
-            terminatedUid: signal.uid,
-          }),
-        );
-      }
-      return Effect.succeed(next._tag === "Same" ? current : next);
-    });
+    const onSignal = current.onSignal;
+    return Effect.flatMap(
+      Effect.suspend(() => onSignal(ctx, signal)),
+      (next) => {
+        if (next._tag === "Unhandled" && signal._tag === "Terminated") {
+          return Effect.fail(
+            new DeathPactException({
+              self: ctx.self.path,
+              terminated: signal.path,
+              terminatedUid: signal.uid,
+            }),
+          );
+        }
+        return Effect.succeed(next._tag === "Same" ? current : next);
+      },
+    );
   }
   // onSignal 미부착 — Terminated 면 DeathPact, 다른 신호는 무시 (current 그대로)
   if (signal._tag === "Terminated") {

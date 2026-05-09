@@ -594,3 +594,13 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [process] USAGE.md 갱신 — _Behaviors 빌더 카탈로그_ + _ActorContext 표면_ + _Tagged Errors_ + _안 되는 것_ 표 모두 M5 표면 (withTimers / withStash / restartWithBackoff / withLimit / ctx.fork / scheduleOnce + RestartLimitExceeded / StashOverflow) 추가. _안 되는 것_ 표는 _진짜 미구현_ (ref.ask, withResetBackoffAfter, matchSchema, unstash 부분, startTimerAtFixedRate) 만 남김. M5 코드 끝 시점의 _현재 표면_ 한 표로 정리.
 - [process] M5 사이클 5 = 코드 _DoD 끝_, 본격 도그푸딩 (M5.1) 만 남음. M3.1, M4.1 패턴 그대로 — 환류 사이클 입력 후 _M5 전체 DoD 🟢_.
 - [process] 다음 갈래: (a) M5.1 본격 도그푸딩 _즉시_ — poly-phony 측 전면 사용 가이드, (b) _Effect 밖 throw_ 의 makeReceive fix 미니 사이클 (사이클 5 LEARNINGS 의 후속 후보) 먼저 박고 도그푸딩 입력, (c) Effect TMap upstream PR (#6225 follow-up). _라이브러리 설계 우선_ 정신상 (b) → (a) 순서 자연스러움.
+
+
+
+### 2026-05-09 — 미니 사이클 (Effect 밖 throw 안전망, ADR-040 후속 resolved)
+
+- [bug+fix] **사이클 4 LEARNINGS 의 _Effect 밖 throw cliff_ resolved.** `interpretStep` / `interpretSignalStep` 안에서 handler/onSignal 호출을 `Effect.suspend(() => current.handle(ctx, msg))` 로 wrap. lazy thunk 가 throw 잡아 die 로 전환 → messageLoop 의 supervision 정상 작동.
+- [insight] **Wrap 위치 결정 — `behavior.ts` (makeReceive) vs `interpreter.ts` (두 step 함수).** 첫 시도 makeReceive 에 wrap → 기존 behavior.test.ts 의 `expect(b.handle).toBe(handler)` 회귀 5건. ADT 의 _참조 동일성_ 깨짐. 두 번째 시도 interpreter 의 step 함수 안 wrap → ADT 표면 보존 + 안전망만 추가 → 회귀 0. _안전망_ 류는 _ADT_ 가 아닌 _해석기_ 안에 두는 게 깔끔 — ADT 는 _순수 데이터_, 해석기가 _실행 정책_ (안전망 포함).
+- [test] 4 통합 테스트 추가 (총 201, 이전 197+4): receiveMessage 직접 throw / receive 직접 throw / receiveSignal 직접 throw (PreRestart 재실패 경로) / Effect.sync 회귀. 5회 flake-free.
+- [insight] **사용자 학습 비용 0.** 기존 `Effect.sync(() => { throw })` 패턴 그대로 + _직접 throw_ 도 잡힘. 사용자 의식 X — _문서 추가_ 도 불요. _안전망_ 의 본질은 _보이지 않는 fix_.
+- [process] 미니 사이클 = _라이브러리 설계 우선_ (ADR-028) 정신의 _도그푸딩 입력 직전 표면 다듬기_ 패턴 첫 사례. M5.1 입력 받기 전에 사용자가 _자연스럽게_ 부딪힐 cliff 미리 처리. 이후 도그푸딩 _진짜 finding_ 만 입력으로 들어옴 — 사이클 5 의 examples 작성 시점에 이미 cliff 알았기에 _examples 패턴_ 도 일관 (Effect.sync 안 throw) 으로 굳혀둠.
