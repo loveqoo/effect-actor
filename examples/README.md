@@ -12,6 +12,7 @@ ADR-011 에 따라 _마일스톤마다 동작하는 예시 한 개_ 가 DoD.
 | `06-backoff.ts` | M5 | restartWithBackoff |
 | `07-stash.ts` | M5 | withStash |
 | `08-timer.ts` | M5 | withTimers |
+| `09-tagged-enum.ts` | (도구) | `Data.TaggedEnum` 으로 메시지 ADT 정의 — constructor + `$match` 자동 |
 
 ## 실행
 

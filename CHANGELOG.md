@@ -8,7 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-_Pending changes here._
+### Added
+- `examples/09-tagged-enum.ts` — `Data.TaggedEnum` (Effect) 로 메시지 ADT 정의 패턴. constructor + `$match` 자동, `{ _tag: "Foo" }` 리터럴 반복 줄임. effect-actor 자체는 메시지 모양에 의견 없음 — 사용자 도메인이라 리터럴 / const factory / `Data.TaggedEnum` 모두 OK.
 
 ## [0.1.0] - 2026-05-10
 
