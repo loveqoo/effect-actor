@@ -670,3 +670,15 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [verify] `pnpm build` → 64 파일 (16 src × {.js, .js.map, .d.ts, .d.ts.map}). `pnpm pack --dry-run` → 42KB tarball, dist/ + LICENSE + package.json + README 만. typecheck + 201 테스트 그대로 통과.
 - [insight] **`.d.ts.map` 의 가치.** 사용자 IDE 의 _go to definition_ 시 우리 src/ .ts 까지 추적 가능 — 라이브러리 디버깅 친화. tsc 의 `declarationMap: true` 한 줄. tsup 도 가능하나 _별도 설정_, tsc 는 _자연_.
 - [process] _두 tsconfig_ 패턴 (dev + build) 이 EffectTS 생태계 정통 (Effect 본체도 같음). dev 는 빠른 피드백 (Bundler resolution + noEmit), build 는 정확성 (Node16 + emit). 사용자 학습 비용 작음.
+
+
+
+### 2026-05-09 — M∞ 사이클 (b): 영어 README + CHANGELOG + CONTRIBUTING + .github 템플릿
+
+- [decision] **README 분리 — README.md = 영어 (npm 진입점), README.ko.md = 한국어 (기존 그대로 보존).** docs/ 는 한국어 _공식_ 그대로 (한국어가 작업 언어, ADR 도 한국어). npm registry / GitHub 첫 화면이 영어 진입점. _다국어 분리_ 의 단순 정통 패턴.
+- [content] 영어 README 의 핵심 한 줄 (Akka Typed 정신) 한국어 README 와 _구조 동형_ — pitch / status / quickstart / magic moment / milestones / versioning / non-goals / docs links / persona. "Korean is canonical" 한 줄 명시 → 사용자가 한국어 docs 안 부담.
+- [content] **CHANGELOG.md = Keep a Changelog 형식 (ADR-041) + 0.1.0 entry _미리 채움_.** Unreleased 섹션 + 0.1.0 (배포 직전 채우는 게 자연이지만 _배포 임박_ 이라 미리). _Added_ 카테고리 한 가지로 모든 표면 (ADR 번호 + 빌더/매처/시그너처) 누적. ADR 번호 하이퍼링크 → ADR / commit / changelog 삼각 추적.
+- [content] **CONTRIBUTING.md = _작은 alpha_ 정신 lightweight.** _Open issue first_ for non-trivial → 1인 maintainer + Akka semantics 제약. 도큐 fix 는 직접 PR. 한국어 docs 가 _공식_ 명시 — 영어 contributor 도 docs 한국어 그대로 둬도 OK 안내.
+- [content] `.github/ISSUE_TEMPLATE/{bug_report,feature_request}.md` + `PULL_REQUEST_TEMPLATE.md`. feature request 가 _out-of-scope check_ (ADR-006 비목표) 박혀 있어 _Cluster / Persistence_ 류 issue 자동 차단. PR template 은 ADR-041 의 _0.x = breaking minor_ 명시.
+- [process] _배포 직전 표면 셋업_ 이 _문서 셋업_ 보다 비용 큼 — README 영어 + CHANGELOG 0.1.0 entry 가 ~30분 중 가장. ADR 박은 시점에 _배포 직전 surface_ 까지 예약된 셈 (ADR-041 의 후속 항목 명시).
+- [insight] **CHANGELOG 의 _ADR 번호 인용_ 패턴.** 모든 Added 항목에 (ADR-NN) 표기 → 사용자가 _왜_ 이 표면이 있는지 ADR 로 직진 가능. 도그푸딩 #4 의 _domain 어휘 자연_ 관찰처럼 — _decision provenance_ 가 사용자 표면에 노출되어 학습 비용 감소.
