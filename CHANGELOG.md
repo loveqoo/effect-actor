@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - `examples/09-tagged-enum.ts` — `Data.TaggedEnum` (Effect) 로 메시지 ADT 정의 패턴. constructor + `$match` 자동, `{ _tag: "Foo" }` 리터럴 반복 줄임. effect-actor 자체는 메시지 모양에 의견 없음 — 사용자 도메인이라 리터럴 / const factory / `Data.TaggedEnum` 모두 OK.
 
+### Changed
+- `examples/02-lifecycle.ts`, `examples/05-restart.ts` — 메시지 정의를 `Data.TaggedEnum` 으로 변형. `switch` 대신 `$match` 로 분기 — 새 case 추가 시 컴파일 강제 (exhaustiveness). 기능 변화 없음.
+
 ## [0.1.0] - 2026-05-10
 
 First public release. Output of milestones M0 through M5 plus the M∞.1 review-feedback cycles (ADR-043/044/045), validated by 4 dogfooding rounds against [poly-phony](https://github.com/loveqoo/poly-phony) and 3 rounds of external `codex review` before publish.

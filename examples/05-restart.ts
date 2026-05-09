@@ -7,10 +7,11 @@
 //   5. _PreRestart hook_ — receiveSignal 로 정리 작업 hook
 //   6. _자식 cascade stop_ — restart 시 자식들이 PostStop 받고 새 instance 에서 다시 spawn
 //   7. _매처 chain_ — TypeError → restart, 그 외 → stop (catch-all)
+// 메시지는 `Data.TaggedEnum` — `$match` 가 `switch` 보다 짧고 새 case 추가 시 컴파일 강제.
 //
 // 실행: pnpm tsx examples/05-restart.ts
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import {
   ActorSystem,
   Behaviors,
@@ -18,13 +19,15 @@ import {
   type Behavior,
 } from "../src/index.js";
 
-type Msg =
-  | { readonly _tag: "Inc" }
-  | { readonly _tag: "Boom" } // TypeError → restart
-  | { readonly _tag: "Fatal" } // 미매치 → stop
-  | { readonly _tag: "Show" };
+type Msg = Data.TaggedEnum<{
+  Inc: {};
+  Boom: {}; // TypeError → restart
+  Fatal: {}; // 미매치 → stop
+  Show: {};
+}>;
+const Msg = Data.taggedEnum<Msg>();
 
-// 자식 actor — restart 시 cascade stop 검증용. PostStop 으로 정리 신호 출력.
+// 자식 actor — 단일 메시지라 그대로 (taggedEnum 의 진가는 _다종_ 일 때).
 const child: Behavior<{ readonly _tag: "Ping" }> = Behaviors.receive<{
   readonly _tag: "Ping";
 }>((_ctx, _msg) => Effect.succeed(Behaviors.same())).receiveSignal(
@@ -37,22 +40,24 @@ const child: Behavior<{ readonly _tag: "Ping" }> = Behaviors.receive<{
 
 // counter(n) — _Behavior 매개변수_ 패턴. PreRestart / PostStop hook.
 const counter = (n: number): Behavior<Msg> =>
-  Behaviors.receive<Msg>((_ctx, msg) => {
-    if (msg._tag === "Inc") return Effect.succeed(counter(n + 1));
-    if (msg._tag === "Show")
-      return Effect.sync(() => {
-        console.log(`  [counter] n = ${n}`);
-        return counter(n);
-      });
-    if (msg._tag === "Boom")
-      return Effect.sync(() => {
-        throw new TypeError("boom — restart 트리거");
-      });
-    // Fatal — 미매치 (RangeError) → 기본 stop
-    return Effect.sync(() => {
-      throw new RangeError("fatal — stop 강등");
-    });
-  }).receiveSignal((_ctx, sig) =>
+  Behaviors.receive<Msg>((_ctx, msg) =>
+    Msg.$match(msg, {
+      Inc: () => Effect.succeed(counter(n + 1)),
+      Show: () =>
+        Effect.sync(() => {
+          console.log(`  [counter] n = ${n}`);
+          return counter(n);
+        }),
+      Boom: () =>
+        Effect.sync<Behavior<Msg>>(() => {
+          throw new TypeError("boom — restart 트리거");
+        }),
+      Fatal: () =>
+        Effect.sync<Behavior<Msg>>(() => {
+          throw new RangeError("fatal — stop 강등");
+        }),
+    }),
+  ).receiveSignal((_ctx, sig) =>
     Effect.sync(() => {
       if (sig._tag === "PreRestart") {
         console.log(`  [counter] PreRestart (n=${n}) — 정리 작업 hook`);
@@ -85,14 +90,14 @@ const program = Effect.gen(function* () {
   console.log(`[main] root uid before any restart: ${uidBefore.slice(0, 8)}...`);
 
   // (1) 정상 처리
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Show" }); // n=2
+  yield* sys.root.tell(Msg.Inc());
+  yield* sys.root.tell(Msg.Inc());
+  yield* sys.root.tell(Msg.Show()); // n=2
 
   // (2) Boom → restart. _Boom 다음 enqueue 되는 메시지_ 는 mailbox 에 보존되어 새 incarnation 에서 처리.
-  yield* sys.root.tell({ _tag: "Boom" }); // restart 트리거
-  yield* sys.root.tell({ _tag: "Inc" }); // 새 counter(0) → counter(1)
-  yield* sys.root.tell({ _tag: "Show" }); // n=1 (Setup 재실행으로 0 리셋 + Inc)
+  yield* sys.root.tell(Msg.Boom()); // restart 트리거
+  yield* sys.root.tell(Msg.Inc()); // 새 counter(0) → counter(1)
+  yield* sys.root.tell(Msg.Show()); // n=1 (Setup 재실행으로 0 리셋 + Inc)
 
   yield* Effect.sleep("100 millis");
 
@@ -102,14 +107,14 @@ const program = Effect.gen(function* () {
   );
 
   // (4) 다시 Boom — 두 번째 restart, 자식도 두 번째 cascade
-  yield* sys.root.tell({ _tag: "Boom" });
-  yield* sys.root.tell({ _tag: "Show" }); // n=0 (Setup 또 리셋)
+  yield* sys.root.tell(Msg.Boom());
+  yield* sys.root.tell(Msg.Show()); // n=0 (Setup 또 리셋)
   yield* Effect.sleep("80 millis");
 
   // (5) Fatal → 미매치 → stop. 이후 메시지는 dead-letter.
-  yield* sys.root.tell({ _tag: "Fatal" });
+  yield* sys.root.tell(Msg.Fatal());
   yield* Effect.sleep("60 millis");
-  yield* sys.root.tell({ _tag: "Inc" }); // dead-letter (액터 죽음)
+  yield* sys.root.tell(Msg.Inc()); // dead-letter (액터 죽음)
   yield* Effect.sleep("40 millis");
 
   yield* sys.shutdown;
