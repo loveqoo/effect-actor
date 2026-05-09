@@ -18,7 +18,7 @@
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
 | M5. 고급 기능 | 🟢 완료 | Backoff / withLimit / Stash / Timer + examples 06~08 + Effect 밖 throw 안전망. ADR-037~040. 201 테스트. **도그푸딩 #4 통과 — finding 0, 회귀 0, 5×3=15회 flake-free.** |
-| M∞. 출시 | 🟡 진행 중 | npm 배포 직전. (a) ✅ semver ADR-041 / (b) ✅ 영어 README + CHANGELOG + CONTRIBUTING / (c) ✅ 빌드 도구 ADR-042 / (d) TMap PR / (e) 0.1.0 배포 / (f) codex review / (g) ✅ 자체 점검 (잔재 0, dead 0, JSDoc 0건만 후속 후보) |
+| M∞. 출시 | 🟡 진행 중 | npm 배포 직전. (a) ✅ semver ADR-041 / (b) ✅ 영어 README + CHANGELOG + CONTRIBUTING / (c) ✅ 빌드 도구 ADR-042 / (d) TMap PR / (e) 0.1.0 배포 / (f) ✅ codex review (4 finding, 모두 P1+P2) / (g) ✅ 자체 점검 / **M∞.1** 환류: ✅ 사이클 1 ADR-043 (cleanup 단일 source) / ✅ 사이클 2 ADR-044 (race-free) / 사이클 3 re-review + 배포 |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
 
@@ -262,6 +262,11 @@
 - 🟢 사이클 2 (도그푸딩 진행) — poly-phony 측 5 사이클 × 3회 모두 통과. _finding 0, 회귀 0, 환류 fix 불요._
 
 **M5 _전체_ DoD 확정 (2026-05-09):** 코드 + examples + 도그푸딩 #4 통과 + 안전망 (Effect 밖 throw fix). 201 테스트.
+
+**M∞.1 환류 사이클 (codex review 4 finding):**
+- 🟢 사이클 1 (F3+F4 — interpreter cleanup 완전성, ADR-043) — 5회 flake-free, 회귀 5개. 2026-05-09.
+- 🟢 사이클 2 (F1+F2 — spawn/watch race-free, ADR-044) — atomic STM tx 로 race window 제거. `ChildNameTaken` 새 Tagged err. 5회 flake-free, 회귀 4개. 210 테스트. 2026-05-10.
+- 🟡 사이클 3 — codex re-review 로 4 finding closed 검증 + 0.1.0 배포.
 
 ---
 

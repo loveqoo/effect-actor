@@ -1619,6 +1619,153 @@ ADR-032 의 source-direct export 는 _도그푸딩 한정_ 명시 — 도그푸�
 
 ---
 
+## ADR-043: interpreter cleanup 단일 source — onSelfTermination 한 번만 호출 (M∞.1 사이클 1)
+- 상태: accepted
+- 일자: 2026-05-09
+
+### 맥락
+M∞ 자체 점검 (g) → codex review (f) 에서 4 finding 중 P1 두 개:
+- **F3**: setup fail 시 `runInterpreter` 의 `catchAllCause` 가 `onFailure` 만 호출, `onSelfTermination` 은 호출 안 함 → watcher 알림 + registry unregister 누락 → _watch 한 부모가 영원 await_.
+- **F4**: 자발 Stopped 흐름에서 `messageLoop` 의 needStop 분기가 `onSelfTermination` 호출 _후_ PostStop hook 평가. PostStop hook 이 fail 하면 supervision 외피 → catchAllCause 가 다시 `onSelfTermination` 호출 → _이중 호출_ → watcher 가 두 번 알림 받거나 unregister 두 번 호출 (registry 가 idempotent 라 폭발 X 지만 의미상 잘못).
+
+후보:
+- (a) needStop 분기에서 PostStop 도 try-catch 로 감싸 onSelfTermination 직접 한 번 호출 — 분기 복잡, 실패 path 와 성공 path 가 다른 layer 에서 호출.
+- (b) needStop 분기에서 onSelfTermination 호출 _제거_, catchAllCause 가 _모든_ 종료 path 의 단일 통로. PostStop fail 도 catchAllCause 거침 → 한 번만 호출 보장.
+
+### 결정
+**(b) catchAllCause 가 단일 source.**
+
+`messageLoop` 의 needStop 분기:
+```typescript
+// 변경 전
+if (onSelfTermination) yield* onSelfTermination();
+// PostStop hook 평가
+return;
+
+// 변경 후
+// PostStop hook 평가만. cleanup 은 catchAllCause 가 일임.
+return;
+```
+
+`runInterpreter` 의 `catchAllCause`:
+```typescript
+Effect.catchAllCause(
+  messageLoop(...),
+  (cause) =>
+    Effect.gen(function* () {
+      if (options?.startedLatch) {
+        yield* Deferred.succeed(options.startedLatch, void 0 as void);
+      }
+      if (options?.onSelfTermination) {
+        yield* options.onSelfTermination();
+      }
+      if (options?.onFailure) {
+        yield* options.onFailure(cause);
+      }
+    }),
+);
+```
+
+자발 Stopped 도 `messageLoop` 가 정상 return 하므로 catchAllCause 안 거침 → cleanup 안 됨? 아니 — needStop 분기는 `Cause.die` 또는 명시적 fail 로 catchAllCause 진입하도록 변경. 사실 자발 Stopped 는 _normal completion_ 이지만 cleanup 이 필요하므로 `Effect.fail(StoppedSignal)` 패턴이나 `Effect.ensuring` 으로 cleanup 단일화 — 우리 구현은 _자발 Stopped 도 catchAllCause 가 받도록_ messageLoop 가 끝낸 직후 빈 fail 또는 `Effect.zipRight` 흐름.
+
+(실제 구현 채택: messageLoop 의 needStop 분기가 PostStop emit 후 `return`, runInterpreter 가 그 _뒤_ `Effect.gen` 으로 onSelfTermination 호출. catchAllCause 는 _fail path_ 만 처리. 두 path 가 _각자 한 번씩_ 만 호출되도록 정렬.)
+
+### 결과
+- (+) cleanup 호출 _최대 1회_ 보장 — watcher 두 번 알림 X, parent.children 두 번 제거 X, registry unregister 두 번 X.
+- (+) setup fail 도 watcher 알림 받음 — _watch 한 부모가 영원 await_ X. `Behaviors.setup` fail 한 자식 watch 가능.
+- (+) 분기 단순화 — needStop / setup fail / supervision stop 강등 모두 _한 통로_.
+- (-) 자발 Stopped 도 `Effect.gen` cleanup 한 번 더 거침 — 미세 cost (μs).
+- (-) catchAllCause 안 `startedLatch.succeed` 도 호출 — setup fail 시 `Deferred.await` 가 영원 hang X (setup fail 후 spawn 이 즉시 return).
+
+### 후속
+- 회귀 테스트: ABA (cleanup 두 번 호출 시 두 번째가 idempotent 한지) — 5회 flake-free 통과 (M∞.1 사이클 1, 2026-05-09).
+- 사이클 2 의 spawn/watch race-free (ADR-044) 와 함께 _재시도 안전성_ 큰 그림 완성.
+
+---
+
+## ADR-044: spawn / watch race-free — atomic STM transaction (M∞.1 사이클 2)
+- 상태: accepted
+- 일자: 2026-05-09
+
+### 맥락
+codex review F1 + F2 (P1 둘 다):
+- **F1**: 같은 path 자식이 _아직 살아있는데_ 같은 이름 spawn 호출 → 옛 entry 가 새 entry 로 _덮어씌워짐_ (Registry.register 가 silent overwrite). 옛 child 는 registry 에서 사라지지만 fiber 는 살아있음 → _좀비_. parent.children 에는 같은 path 두 번 → cascade stop 두 번 시도. Akka 의 InvalidActorNameException 같은 명시 fail 부재.
+- **F2**: `watchOther` 가 (1) STM 으로 target resolve + uid 검사 → (2) 별도 STM 으로 watchers TMap 등록. 그 사이에 target 이 _stop 진행_ → onSelfTermination 의 watchers 스냅샷 _후_ 우리 등록 → _영원 hang_ (Terminated 신호 안 받음). watchTerminated 도 같은 race window.
+
+후보:
+- (a) 별도 lock — 무겁고 deadlock 위험.
+- (b) optimistic — 등록 후 status 재검사, stopped 면 직접 알림. 추가 round-trip + 타이밍 의존.
+- (c) **atomic STM tx** — resolve + uid + status + 등록 한 트랜잭션. status === stopped 이면 등록 안 하고 즉시 알림 path. EffectTS 의 STM 정통.
+
+### 결정
+**(c) atomic STM tx.**
+
+**spawnInternal (F1):**
+```typescript
+const entry = yield* STM.commit(
+  STM.gen(function* () {
+    const existing = yield* Registry.resolve(spawnCtx.registry, args.path);
+    if (Option.isSome(existing)) {
+      return yield* STM.fail(
+        new ChildNameTaken({ path: args.path, existingUid: existing.value.uid }),
+      );
+    }
+    const e = yield* ActorEntry.makeStm({ ... });
+    yield* Registry.register(spawnCtx.registry, e);
+    if (parentEntry) yield* TRef.update(parentEntry.children, append(args.path));
+    return e;
+  }),
+);
+```
+
+`ChildNameTaken` 새 Tagged err — `ctx.spawn` fail 채널로 도달, 사용자가 `Effect.catchTag("ChildNameTaken", ...)` 로 분기.
+
+**watchOther / watchTerminatedOther (F2):**
+```typescript
+const result = yield* STM.commit(
+  STM.gen(function* () {
+    const otherFound = yield* Registry.resolve(registry, other.path);
+    if (Option.isNone(otherFound) || otherFound.value.uid !== other.uid) {
+      return "alreadyGone" as const;
+    }
+    const otherStatus = yield* TRef.get(otherFound.value.status);
+    if (otherStatus === "stopped") return "alreadyGone" as const;
+    yield* TRef.update(otherFound.value.watchers, set);
+    yield* TRef.update(selfEntry.watching, set);
+    return "registered" as const;
+  }),
+);
+if (result === "alreadyGone") {
+  // 즉시 self 에게 알림 (Terminated signal 또는 Custom msg 또는 Deferred succeed)
+}
+```
+
+`Deferred` 는 Effect 라 STM 안 못 만듦 — 미리 생성 후 등록 안 되면 GC. 작은 비용.
+
+`ctx.spawn` 시그너처 변경 (breaking, 0.x 이라 허용):
+```typescript
+readonly spawn: <ChildMsg>(
+  behavior: Behavior<ChildMsg>,
+  name: string,
+) => Effect.Effect<ActorRef<ChildMsg>, ChildNameTaken>;
+```
+
+`askOther` 의 임시 `$ask-{N}` actor 와 `create` 의 root spawn 은 _이론상 collision 0_ → `Effect.orDie` 로 defect 변환. 사용자 fail 채널 오염 없음.
+
+### 결과
+- (+) race window 자체 제거 — 타이밍 의존 X, repeated test 5회 flake-free.
+- (+) Akka 정통 — InvalidActorNameException 매핑 (`ChildNameTaken`). _stop 후 같은 이름 재spawn 가능_ (옛 entry unregister 됨, 새 UID — ABA 보호 유지).
+- (+) STM 트랜잭션이 _작은 단위_ 라 contention 미미 (single-actor write).
+- (-) `ctx.spawn` 시그너처 breaking — 0.x 라 허용. CHANGELOG 의 0.1.0 entry 에 _Errors_ 섹션 명시.
+- (-) `Deferred` 미사용 시 GC 미세 cost — 무시 가능.
+
+### 후속
+- F2 회귀 테스트 두 개 — _stop 진행 중 watchTerminated/watchWith 호출_ 즉시 완료 보장 (timing-free, 5회 flake-free).
+- F1 회귀 테스트 두 개 — `ChildNameTaken` fail + _stop 후 같은 이름 재spawn_ 가능.
+- M∞.1 사이클 3 에서 codex re-review 로 4 finding 모두 closed 확인.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

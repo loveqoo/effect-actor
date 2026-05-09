@@ -57,3 +57,11 @@ export class StashOverflow extends Data.TaggedError("StashOverflow")<{
   readonly path: ActorPath;
   readonly capacity: number;
 }> {}
+
+// M∞.1 사이클 2 (ADR-044) — 같은 path 자식이 _아직 살아있는데_ 같은 이름 spawn 호출.
+// Akka 의 InvalidActorNameException 매핑. 자식 stop 후엔 같은 이름 재spawn 가능 (UID 다름, ADR-016 ABA 보호).
+// ctx.spawn 의 fail 채널로 도달 — 사용자가 Effect.catchTag("ChildNameTaken", ...) 로 분기 가능.
+export class ChildNameTaken extends Data.TaggedError("ChildNameTaken")<{
+  readonly path: ActorPath;
+  readonly existingUid: string;
+}> {}

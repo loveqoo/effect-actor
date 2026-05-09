@@ -18,7 +18,7 @@ import {
 } from "effect";
 import type { Behavior } from "./behavior.js";
 import { Behaviors, unwrapMeta } from "./behavior.js";
-import { AskTimeout } from "./errors.js";
+import { AskTimeout, ChildNameTaken } from "./errors.js";
 import { ActorContext } from "./context.js";
 import { ActorEntry } from "./entry.js";
 import type { ActorEntry as ActorEntryT } from "./entry.js";
@@ -54,10 +54,13 @@ const spawnInternal = <Msg>(
     // root 면 null. 자식이면 parent entry — children TMap 갱신용.
     readonly parentEntry: ActorEntryT<unknown> | null;
   },
-): Effect.Effect<{
-  readonly ref: ActorRef<Msg>;
-  readonly entry: ActorEntryT<Msg>;
-}> =>
+): Effect.Effect<
+  {
+    readonly ref: ActorRef<Msg>;
+    readonly entry: ActorEntryT<Msg>;
+  },
+  ChildNameTaken
+> =>
   Effect.gen(function* () {
     // 0. 메타 추출 (ADR-026)
     const meta = unwrapMeta(args.behavior);
@@ -76,9 +79,21 @@ const spawnInternal = <Msg>(
       ExecutionStrategy.sequential,
     );
 
-    // 5,6,7. ActorEntry + Registry.register + parent.children 갱신 — _한 STM tx_ (ADR-017)
+    // 5,6,7. _live child 검사_ + ActorEntry + Registry.register + parent.children 갱신 — _한 STM tx_ (ADR-017, ADR-044).
+    // M∞.1 사이클 2 (ADR-044, F1): 같은 path 가 _이미 살아있는 entry_ 면 ChildNameTaken fail.
+    // STM.fail → Effect fail 채널로 propagate. 사용자가 catchTag("ChildNameTaken") 로 분기 가능.
+    // _stop 후_ 같은 이름 재spawn 가능 (옛 entry 가 unregister 되었으므로 resolve None).
     const entry = yield* STM.commit(
       STM.gen(function* () {
+        const existing = yield* Registry.resolve(spawnCtx.registry, args.path);
+        if (Option.isSome(existing)) {
+          return yield* STM.fail(
+            new ChildNameTaken({
+              path: args.path,
+              existingUid: existing.value.uid,
+            }),
+          );
+        }
         const e = yield* ActorEntry.makeStm<Msg>({
           path: args.path,
           uid,
@@ -394,6 +409,9 @@ const stopActorByRef = <Msg>(
 
 // ctx.watch / ctx.watchWith — 양방향 TMap 등록 (ADR-022).
 // 이미 죽은 / stale ref 면 즉시 self 에게 알림 (Akka 정통).
+// M∞.1 사이클 2 (ADR-044, F2): _atomic STM tx_ — resolve + uid 검사 + status 검사 + watchers 등록 한 트랜잭션.
+// stop 윈도우 race 차단: target.status 가 _이미 stopped_ 면 등록 안 하고 _즉시 알림 path_ 로.
+// 이전 코드는 resolve + uid 만 STM, watchers 등록 별도 STM 이라 race window 존재.
 const watchOther = <Msg, Other>(
   registry: RegistryT,
   self: ActorRef<Msg>,
@@ -402,14 +420,34 @@ const watchOther = <Msg, Other>(
   watchMsg: WatchMessage,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const otherFound = yield* STM.commit(
-      Registry.resolve(registry, other.path),
+    const selfKey = WatchKey.make(self.path, self.uid);
+    const otherKey = WatchKey.make(other.path, other.uid);
+    const result = yield* STM.commit(
+      STM.gen(function* () {
+        const otherFound = yield* Registry.resolve(registry, other.path);
+        if (
+          Option.isNone(otherFound) ||
+          otherFound.value.uid !== other.uid
+        ) {
+          return "alreadyGone" as const;
+        }
+        const otherStatus = yield* TRef.get(otherFound.value.status);
+        if (otherStatus === "stopped") {
+          // 이미 죽어가는 중 — 등록하면 race 로 알림 못 받을 위험 (onSelfTermination 의 watchers 스냅샷 후일 수도).
+          return "alreadyGone" as const;
+        }
+        yield* TRef.update(otherFound.value.watchers, (m) =>
+          HashMap.set(m, selfKey, watchMsg),
+        );
+        yield* TRef.update(selfEntry.watching, (m) =>
+          HashMap.set(m, otherKey, watchMsg),
+        );
+        return "registered" as const;
+      }),
     );
-    if (
-      Option.isNone(otherFound) ||
-      otherFound.value.uid !== other.uid
-    ) {
-      // 이미 죽은 / 새 incarnation — 즉시 self 에게 알림
+
+    if (result === "alreadyGone") {
+      // 즉시 self 에게 알림
       if (watchMsg._tag === "Terminated") {
         yield* Queue.offer(
           selfEntry.cell.signalQueue,
@@ -423,51 +461,45 @@ const watchOther = <Msg, Other>(
       }
       // Deferred case 는 watchOther 호출자 (ctx.watch/watchWith) 에서 안 들어옴 —
       // watchTerminatedOther 가 직접 처리 (stale 시 즉시 return).
-      return;
     }
-
-    const otherKey = WatchKey.make(other.path, other.uid);
-    const selfKey = WatchKey.make(self.path, self.uid);
-    yield* STM.commit(
-      STM.gen(function* () {
-        yield* TRef.update(otherFound.value.watchers, (m) =>
-          HashMap.set(m, selfKey, watchMsg),
-        );
-        yield* TRef.update(selfEntry.watching, (m) =>
-          HashMap.set(m, otherKey, watchMsg),
-        );
-      }),
-    );
   });
 
 // ctx.watchTerminated — Effect 형태 termination await (ADR-030).
-// Deferred 만들어 target.watchers 에 등록 → target stop 시 stopActor 가 Deferred.succeed.
-// 이미 죽은 / stale ref → 즉시 Effect 끝 (Deferred 만들 필요 없이).
+// M∞.1 사이클 2 (ADR-044, F2): _atomic STM tx_ — resolve + uid + status 검사 + Deferred 등록 한 트랜잭션.
+// 이전 코드는 resolve + uid 검사 STM, watchers 등록 별도 STM 이라 그 사이에 target 이 stop 진행 →
+// onSelfTermination 의 watchers 스냅샷 _후_ 등록되어 _영원히 await_ 위험.
+// Deferred 는 STM 안에서 못 만들어서 (Effect) 미리 생성. 등록 안 하면 GC 됨 (작은 비용).
 const watchTerminatedOther = <Msg, Other>(
   registry: RegistryT,
   self: ActorRef<Msg>,
   other: ActorRef<Other>,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const otherFound = yield* STM.commit(
-      Registry.resolve(registry, other.path),
-    );
-    if (
-      Option.isNone(otherFound) ||
-      otherFound.value.uid !== other.uid
-    ) {
-      // 이미 죽은 / 새 incarnation — 즉시 끝
-      return;
-    }
-
     const deferred = yield* Deferred.make<void, never>();
     const selfKey = WatchKey.make(self.path, self.uid);
-    yield* STM.commit(
-      TRef.update(otherFound.value.watchers, (m) =>
-        HashMap.set(m, selfKey, WatchMessage.Deferred(deferred)),
-      ),
+    const result = yield* STM.commit(
+      STM.gen(function* () {
+        const otherFound = yield* Registry.resolve(registry, other.path);
+        if (
+          Option.isNone(otherFound) ||
+          otherFound.value.uid !== other.uid
+        ) {
+          return "alreadyGone" as const;
+        }
+        const otherStatus = yield* TRef.get(otherFound.value.status);
+        if (otherStatus === "stopped") {
+          return "alreadyGone" as const;
+        }
+        yield* TRef.update(otherFound.value.watchers, (m) =>
+          HashMap.set(m, selfKey, WatchMessage.Deferred(deferred)),
+        );
+        return "registered" as const;
+      }),
     );
-
+    if (result === "alreadyGone") {
+      // 이미 죽은 / 새 incarnation / 죽어가는 중 — 즉시 끝
+      return;
+    }
     yield* Deferred.await(deferred);
   });
 
@@ -492,11 +524,12 @@ const askOther = <Msg, TargetMsg, Resp>(
     );
     const tempName = `$ask-${randomUUID().slice(0, 8)}`;
 
+    // ChildNameTaken 은 이론상 불가능 (8-hex UUID prefix collision = 사실상 0). defect 변환.
     const { ref: tempRef } = yield* spawnInternal<Resp>(spawnCtx, {
       path: ActorPath.child(selfEntry.path, tempName),
       behavior: tempBehavior,
       parentEntry: selfEntry as ActorEntryT<unknown>,
-    });
+    }).pipe(Effect.orDie);
 
     yield* spawnCtx.handle.tell(target, make(tempRef));
 
@@ -584,6 +617,7 @@ const create = <RootMsg>(
       handle: handleRef.ref,
     };
 
+    // root spawn 은 빈 registry 라 ChildNameTaken 불가능. defect 변환 — create 는 fail-free.
     const { ref: rootRef, entry: rootEntry } = yield* spawnInternal<RootMsg>(
       spawnCtx,
       {
@@ -591,7 +625,7 @@ const create = <RootMsg>(
         behavior: rootBehavior,
         parentEntry: null,
       },
-    );
+    ).pipe(Effect.orDie);
 
     const sys: ActorSystem<RootMsg> = {
       name,

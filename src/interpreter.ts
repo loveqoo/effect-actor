@@ -295,11 +295,11 @@ const messageLoop = <Msg>(
         // M4.1 사이클 2 (의제 1): supervisor stop 강등도 PostStop hook 발사 — 자발 Stopped 흐름과 정합.
         // M5 사이클 1: restart 한도 초과 / PreRestart 재실패도 같은 경로 (ADR-037 통일).
         // PostStop hook 의 fail 은 무시 (cleanup 단계, 원본 cause propagate 가 우선).
-        // onSelfTermination 도 호출 (watcher 알림 + registry unregister).
+        // M∞.1 사이클 1 (ADR-043): onSelfTermination 호출 _제거_ — 외부 catchAllCause 가 단일 source.
+        // _모든_ fail path (Setup 중 fail / PostStop handler fail / supervisor stop 강등 등) 가 통합.
         yield* Effect.ignore(
           interpretSignalStep(lastActive, ctx, SignalNs.PostStop),
         );
-        if (onSelfTermination) yield* onSelfTermination();
         return yield* Effect.failCause(
           stopCause ?? Cause.die(new Error("supervision: unknown cause")),
         );
@@ -348,16 +348,22 @@ export const runInterpreter = <Msg>(
       options?.onRestart,
       options?.onSelfTermination,
     ),
-    (cause) => {
-      // Setup 평가 도중 fail 시 startedLatch 가 아직 안 끝남 → spawn 의 await 영원. 여기서 succeed 보장.
-      const latchEnsure = options?.startedLatch
-        ? Deferred.succeed(options.startedLatch, void 0 as void).pipe(
-            Effect.asVoid,
-          )
-        : Effect.void;
-      const hook = options?.onFailure;
-      return latchEnsure.pipe(
-        Effect.flatMap(() => (hook ? hook(cause) : Effect.void)),
-      );
-    },
+    (cause) =>
+      Effect.gen(function* () {
+        // Setup 평가 도중 fail 시 startedLatch 가 아직 안 끝남 → spawn 의 await 영원. 여기서 succeed 보장.
+        if (options?.startedLatch) {
+          yield* Deferred.succeed(options.startedLatch, void 0 as void);
+        }
+        // M∞.1 사이클 1 (ADR-043): cleanup 단일 source — 모든 fail path 가 여기 통과.
+        // F3 (Setup 첫 receive 전 fail) / F4 (PostStop handler fail) / supervisor stop 강등 모두
+        // _이 catchAllCause_ 가 onSelfTermination 호출 (messageLoop 의 needStop 분기에서 제거됨).
+        // _자발 Stopped_ + _외부 PostStop 정상_ 흐름은 messageLoop 가 정상 종료 → 여기 안 거치고
+        // messageLoop 끝의 onSelfTermination 호출 (단일 path 보장).
+        if (options?.onSelfTermination) {
+          yield* options.onSelfTermination();
+        }
+        if (options?.onFailure) {
+          yield* options.onFailure(cause);
+        }
+      }),
   );

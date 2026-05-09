@@ -695,3 +695,36 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [finding] **JSDoc 0개** — 모든 export 에 `/** ... */` 부재. IDE hover 시 빌더 의미 표시 안 됨. USAGE.md 가 1차 표면이라 _절대 cliff_ 는 아님. 비용 30~60분 — 별도 사이클 (배포 후 사용자 IDE feedback 받고) 후보.
 - [decision] **(g) 자체 코드 변경 0.** 명백한 잔재/dead/일관성 모두 깨끗. _구조적 cliff_ (예: stopActor 재귀 깊이, restartHistory 무한 증가, watcher unbounded forEach) 는 codex 가 잡을 영역 — (f) 로 패스.
 - [insight] **자체 점검의 가치 = _명백한 cliff 자동 차단_.** _구조적 cliff_ 는 외부 시야 (codex / 도그푸딩) 가 우월. 두 layer 분리: 자체 (코드 표면 깨끗) → 외부 (구조/일관성). _signal-noise ratio_ 좋아짐.
+
+
+
+### 2026-05-09 — M∞ 사이클 (f): codex review 4 finding (P1×2 + P2×2)
+
+- [finding] **F1 (P1)**: 같은 path 자식이 _아직 살아있는데_ 같은 이름 spawn → Registry.register 가 silent overwrite → 옛 entry 사라지고 fiber 만 _좀비_. parent.children 같은 path 두 번 → cascade stop 두 번. Akka 의 InvalidActorNameException 부재.
+- [finding] **F2 (P1)**: `watchOther` / `watchTerminatedOther` 가 (1) STM 으로 target resolve + uid 검사 → (2) 별도 STM 으로 watchers 등록. 그 사이 target 이 stop 진행 → onSelfTermination watchers 스냅샷 _후_ 등록 → _영원 hang_.
+- [finding] **F3 (P1 직전)**: `runInterpreter` 의 `catchAllCause` 가 setup fail 시 `onFailure` 만 호출, `onSelfTermination` 누락 → watcher 영원 await + registry stale entry.
+- [finding] **F4 (P2)**: 자발 Stopped 흐름의 needStop 분기가 `onSelfTermination` 호출 _후_ PostStop hook. PostStop fail 시 supervision 외피 → catchAllCause 가 다시 onSelfTermination 호출 → _이중_.
+- [decision] **모두 fix → re-review → 배포** (사용자 1번 선택, 4 갈래 중). 자체 점검 (g) 는 _명백 cliff_ 만 잡는다는 가설 검증 — codex 가 _구조적_ 4 finding 발견. 자체+외부 _두 layer_ 패턴 강화.
+- [process] codex CLI 첫 시도 5.5분 timeout (deep review 중 잘림) → 10분 timeout 으로 재시도 5분 안 결과. `--base origin/main` + PROMPT 동시 사용 불가 (CLI 0.129 breaking) → PROMPT 생략. 인내심 비용 작음.
+- [insight] **외부 review 는 _구조적 cliff_ 잡는 게 평균.** 자체 점검 (코드 표면 깨끗) 통과해도 _Akka semantics_ (race window, cleanup ordering, ABA) 는 외부가 우월. 배포 직전 외부 검증의 가치 1회 더 확인.
+
+
+
+### 2026-05-09 — M∞.1 사이클 1: F3+F4 fix — interpreter cleanup 단일 source (ADR-043)
+
+- [decision] **catchAllCause 가 cleanup 단일 통로.** `messageLoop` needStop 분기에서 `onSelfTermination` 호출 _제거_ — PostStop fail 도 catchAllCause 거침 → cleanup 한 번만 호출 보장. setup fail path 도 `Effect.gen` 으로 `startedLatch.succeed` + `onSelfTermination` + `onFailure` 모두 거침.
+- [verify] **회귀 테스트 5개**: F3 두 개 (root setup fail, 자식 setup fail 시 watcher Terminated 받음), F4 두 개 (외부 PostStop fail / 자발 Stopped PostStop fail 시 cleanup 한 번만), ABA 회귀 1 (cleanup 두 번 호출 시 두 번째 idempotent).
+- [verify] 5회 flake-free, 201 → 206 테스트.
+- [insight] **cleanup ordering 의 _단일 source 원칙_** — Akka Typed 의 supervision 외피처럼, 종료 흐름은 _한 곳_ 에 모이는 게 정합. 분기 곳곳 cleanup → 이중 호출 + race + 누락 모두 피하기 어려움. ADR-037 (자발 Stopped) + ADR-043 (단일 source) 이 같은 정신.
+
+
+
+### 2026-05-10 — M∞.1 사이클 2: F1+F2 fix — spawn/watch race-free (ADR-044)
+
+- [decision] **atomic STM tx 로 race window 자체 제거.** `spawnInternal` 의 _live child 검사 + ActorEntry 생성 + Registry.register + parent.children 갱신_ 한 트랜잭션. `watchOther` / `watchTerminatedOther` 의 _resolve + uid + status + watchers 등록_ 한 트랜잭션. 이전 별도 STM 두 개 사이 race window 가 _이론상_ 존재 — atomic tx 로 차단.
+- [decision] **`ChildNameTaken` 새 Tagged err** — `ctx.spawn` fail 채널 (`Effect.Effect<ActorRef, ChildNameTaken>`). 사용자가 `Effect.catchTag("ChildNameTaken", ...)` 분기 가능. `askOther` 의 `$ask-{N}` 임시 actor 와 `create` 의 root spawn 은 _이론상 collision 0_ → `Effect.orDie` 로 defect 변환 (사용자 fail 채널 오염 X).
+- [decision] **status === "stopped" 면 등록 안 하고 즉시 알림.** `watchOther` 가 죽어가는 중 target 에 watcher 등록하면 onSelfTermination 의 watchers 스냅샷 _후_ 라 영원 hang. STM tx 안 status 검사 → "alreadyGone" 반환 → 즉시 `Signal.Terminated` 또는 Custom msg offer.
+- [verify] **회귀 테스트 4개**: F1 두 개 (`ChildNameTaken` fail / stop 후 같은 이름 재spawn 가능), F2 두 개 (stop 진행 중 watchTerminated/watchWith 즉시 완료, 영원 hang X).
+- [verify] 5회 flake-free, 206 → 210 테스트.
+- [insight] **Deferred 미리 생성 패턴.** STM 안 Effect (Deferred.make) 못 부름 → 미리 만들고 등록 안 되면 GC. 작은 비용 (μs). _STM 트랜잭션 경계_ 와 _Effect 경계_ 가 다를 때의 정통 패턴.
+- [insight] **race-free 검증 = _직접 trigger 가능_ 한 회귀 테스트.** F2 두 테스트는 _stop 후 watch_ + _stop 와 watch 동시_ 두 패턴 모두 즉시 완료 보장 (timing-free). 이전엔 timing 으로 통과했지만 _이론상_ 위험. atomic tx 로 _이론상도_ 차단.

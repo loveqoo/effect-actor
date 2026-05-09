@@ -1,6 +1,6 @@
 import type { Duration, Effect, Fiber } from "effect";
 import type { Behavior } from "./behavior.js";
-import type { AskTimeout } from "./errors.js";
+import type { AskTimeout, ChildNameTaken } from "./errors.js";
 import type { ActorRef, ActorSystemHandle } from "./ref.js";
 
 // ActorContext — Behavior handler 안에서 외부와 상호작용하는 통로 (ADR-007).
@@ -14,7 +14,7 @@ export interface ActorContext<Msg> {
   readonly spawn: <ChildMsg>(
     behavior: Behavior<ChildMsg>,
     name: string,
-  ) => Effect.Effect<ActorRef<ChildMsg>>;
+  ) => Effect.Effect<ActorRef<ChildMsg>, ChildNameTaken>;
   readonly stop: <ChildMsg>(
     child: ActorRef<ChildMsg>,
   ) => Effect.Effect<void>;
@@ -61,7 +61,7 @@ const make = <Msg>(args: {
   readonly spawn: <ChildMsg>(
     behavior: Behavior<ChildMsg>,
     name: string,
-  ) => Effect.Effect<ActorRef<ChildMsg>>;
+  ) => Effect.Effect<ActorRef<ChildMsg>, ChildNameTaken>;
   readonly stop: <ChildMsg>(
     child: ActorRef<ChildMsg>,
   ) => Effect.Effect<void>;
