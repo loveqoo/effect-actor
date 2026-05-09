@@ -1144,6 +1144,95 @@ Strategies.restart.withLimit({
 
 ---
 
+## ADR-038: restartWithBackoff — 점진 sleep + jitter + .withLimit chain (M5 사이클 2)
+- 상태: accepted
+- 일자: 2026-05-09
+- 출처: M5 사이클 2 — `Strategies.restartWithBackoff` 빌더 + `messageLoop` 의 backoff sleep 분기
+
+### 맥락
+ADR-037 (사이클 1) 에서 `Strategies.restart.withLimit` + restart-cleanup 통일 정책을 정함. 사이클 2 의 거리:
+
+1. **Strategy ADT 형태** — option A: `Restart` 에 `backoff` 필드 추가, option B: 새 `_tag` (`RestartWithBackoff`) 분리.
+2. **attemptIndex 카운터 공유 vs 별도** — 사이클 1 의 `restartHistory` (한도 윈도우) 를 backoff 도 공유할지, 별도 `backoffAttemptIndex` 를 둘지.
+3. **jitter 의 방향** — Akka 정통 (+ 만) vs 양방향 (±factor).
+4. **backoff sleep 도중 외부 신호** — sleep 도중 `sys.shutdown` 또는 `ctx.stop` 이 와도 sleep 끝까지 기다릴지, race 로 즉시 깨울지.
+
+### 결정
+
+**A. ADT 형태 — option A (`Restart` 에 `backoff: BackoffConfig | null` 추가).**
+
+```ts
+export type Strategy =
+  | { _tag: "Resume" }
+  | {
+      _tag: "Restart";
+      limit: RestartLimit | null;
+      backoff: BackoffConfig | null;
+    }
+  | { _tag: "Stop" };
+```
+
+- (+) interpreter 분기 변경 최소 — 기존 `if (strategy._tag === "Restart")` 그대로, 안에서 `strategy.backoff` 체크만 추가.
+- (+) `Strategies.restart` (사이클 1) 와 `Strategies.restartWithBackoff` (사이클 2) 의 _반환 타입 동형_ — 둘 다 `Strategy & { withLimit: (limit) => Strategy }`. `.withLimit` chain 자연스러움.
+- (-) `Restart._tag === "Restart"` 한 분기 안에 두 변종 — 사용자가 디버그 시 `backoff !== null` 도 봐야. ADT 명시성 약간 낮음. 의도적 trade-off.
+
+**B. attemptIndex 카운터 공유 — `restartHistory` 를 둘 다 사용.**
+
+- 한도 검사: `restartHistory.length > maxNrOfRetries` (윈도우 슬라이드 후).
+- backoff: `attemptIndex = restartHistory.length - 1` (push 후 length, 0-based).
+- _push 는 항상_ — limit 무관 (사이클 1 의 _limit 있을 때만 push_ 가 사이클 2 의 backoff-only 케이스에서 attemptIndex 항상 0 = minBackoff 만 sleep 버그 일으킴, 첫 구현에서 발견).
+- 윈도우 슬라이드는 _limit 있을 때만_. backoff 만 있으면 슬라이드 X → `restartHistory` 무한 증가. 메모리: 1년 30만 fail = ~2.4MB, 작음. _limit 부착 권장_ 으로 문서화.
+
+→ 두 fix 모두 `messageLoop` 의 _restart 분기 한 군데_ 에 통합. 코드 단순.
+
+**C. jitter — Akka 정통 (+ 방향만).**
+
+```ts
+const jittered = randomFactor > 0 ? exp * (1 + Math.random() * randomFactor) : exp;
+```
+
+- - 방향 jitter 는 sleep 너무 짧음 → backoff 의미 약화.
+- Akka `BackoffSupervisor` 도 같은 공식. 일관성.
+- `randomFactor: 0` 기본 — 결정성 (테스트 친화).
+
+**D. backoff sleep 도중 외부 신호 — sleep 끝까지 기다림 (단순 path).**
+
+- `Effect.sleep(delay)` 는 interruptible. 그러나 `stopActor` 는 `fiber.await` 만 호출 (interrupt X, M3 ADR-031) → sleep 도중 sys.shutdown 도 sleep 끝까지 기다림.
+- maxBackoff 가 길면 (예: 1분) sys.shutdown 도 1분 걸림 — 의도된 trade-off.
+- _race 로 sleep 깨우는 안_ (backoff sleep + signalQueue.take 경합) 은 코드 복잡도 늘리고 _backoff 의 의미_ 흐림 (sleep = "기다린 후 시도"). M∞ 본격 도그푸딩에서 표면 빈도 보고 별도 fix.
+
+**E. 사용 표면.**
+
+```ts
+Behaviors.supervise(b)
+  .onFailure(
+    Strategies.matchAll,
+    Strategies.restartWithBackoff({
+      minBackoff: "100 millis",
+      maxBackoff: "10 seconds",
+      randomFactor: 0.2,  // 옵셔널, 기본 0
+    }).withLimit({ maxNrOfRetries: 10, withinTimeRange: "1 minute" })
+  )
+```
+
+- `withLimit` chain 가능 — 사이클 1 빌더와 동형.
+- `Duration.DurationInput` 그대로 — `"100 millis"`, `Duration.seconds(1)` 모두 OK.
+- `computeBackoffDelay(attemptIndex, BackoffConfig)` 도 export — 사용자가 직접 sleep 합성하고 싶을 때 또는 단위 테스트.
+
+### 결과
+- (+) Akka 정통 시그너처 + .withLimit chain — 마이그레이션 친숙.
+- (+) 사이클 1 의 코드 경로 그대로 확장 (한 군데 보강) — 회귀 0 (사이클 1 의 모든 테스트 그대로 통과).
+- (+) `restartHistory` 단일 carrier — 한도 + backoff 가 _같은 윈도우_ 공유. 사용자 모델 단순.
+- (+) backoff sleep 도중 mailbox 보존 자동 — 사용자가 의식할 필요 X.
+- (-) backoff-only (no limit) 사용 시 `restartHistory` 무한 증가 — 메모리 작지만 누수. _limit 부착 권장_ 으로 문서화.
+- (-) backoff sleep 도중 sys.shutdown 도 sleep 끝까지 기다림 — UX trade-off.
+
+### 후속 (M5+)
+- `Strategies.restartWithBackoff` 의 `withResetBackoffAfter` (Akka) — 일정 시간 fail 없으면 backoff 카운트 reset. 현재 `withLimit` 의 윈도우와 묶여 있어 효과 일부 있음, 명시 분리는 별도.
+- backoff sleep 도중 `Effect.race(sleep, signal)` 로 stop 즉시 응답 — M∞ 표면 빈도 보고.
+
+---
+
 ## 갱신 규칙
 
 - 새 결정은 다음 ADR 번호로 추가.

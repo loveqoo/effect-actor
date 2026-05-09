@@ -545,3 +545,17 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [test] 8 테스트 추가 (총 169): 단위 4 (`Strategies.restart` 의 limit 기본값 / withLimit 새 객체 / 호출마다 다른 객체 / 참조 동일성 회귀) + 통합 4 (한도 초과 stop 강등 + watcher 알림 / sliding window 카운트 리셋 / 무한 restart 회귀 / PreRestart 재실패 stop 강등 + watcher 알림). 5회 flake-free. errors.test.ts 에 `RestartLimitExceeded` 단위 1개 추가.
 - [insight] **ADR-037 의 _통일 정책_ 이 자연스러운 이유** — M4.1 사이클 2 에서 `onSelfTermination` 콜백 도입한 시점에 _stop 강등 경로_ 가 단일화되어 있었음. 이번 사이클은 그 경로에 _두 새 진입점_ (한도 초과 / PreRestart 재실패) 만 추가. 즉 _아키텍처가 fix 를 자연스럽게 받아들임_ — M4.1 의 통일 작업이 M5 사이클 1 의 _비용을 미리 지불한 셈_. _라이브러리 설계 우선_ (ADR-028) 정신의 실효 사례.
 - [process] supervision.test.ts 에서 `RestartLimitExceeded` import 했다 제거 — 통합 테스트는 cause type 검증보다 _발사된 cleanup hooks_ (PostStop hook 호출 + watcher 알림) 검증이 우선. cause 자체 단위 검증은 errors.test.ts 에서.
+
+
+
+### 2026-05-09 — M5 사이클 2 (restartWithBackoff, ADR-038)
+
+- [design] **ADT 형태 — `Restart` 에 `backoff: BackoffConfig | null` 추가 (option A).** 새 `_tag` 분리 (option B) 대신. 이유: interpreter 의 `if (strategy._tag === "Restart")` 분기 그대로 두고 안에서 `backoff` 만 체크 — 사이클 1 의 코드 경로 재사용. _사이클 1 의 `restart` 와 사이클 2 의 `restartWithBackoff` 가 _반환 타입 동형_ (`Strategy & { withLimit }`) 으로 `.withLimit` chain 자연스러움._ 사용자 표면 일관성 + 내부 복잡도 단순화.
+- [design] **`restartHistory` 카운터 공유 — 한도 + backoff 가 _같은 윈도우_.** 사용자 모델 단순화. backoff-only 사용 시 `restartHistory` 무한 증가 (메모리 누수 작음, _limit 부착 권장_ 으로 문서화). _자료구조 단일 carrier_ 가 ADT 단일 분기와 짝.
+- [design] **jitter 는 + 방향만 (Akka 정통).** `exp * (1 + Math.random() * randomFactor)`. ± 방향이면 sleep 너무 짧아 backoff 의미 약화. Akka `BackoffSupervisor` 와 일관.
+- [bug] **첫 구현 — `restartHistory.push` 가 `pendingRestartLimit !== null` 조건부였음 (사이클 1 코드 그대로).** backoff-only 케이스 (limit 없음) 에서 `restartHistory.length` 항상 0 → `attemptIndex=0` → 항상 minBackoff (점진 증가 X). 통합 테스트 _backoff 점진 증가_ 가 즉시 잡음 (`t2 - t1 ≥ 140` 기대, 실측 82). fix: push 를 한도 검사와 _분리_ — 항상 push, 윈도우 슬라이드만 limit 있을 때. _사이클 1 의 자료구조가 사이클 2 의 케이스를 _완전 모르고_ 만들어졌다는 신호_ — 자료구조 변경이 사이클별로 점진적이라 어쩔 수 없는 trade-off, 그러나 _두 use case 의 invariant 차이_ 를 박는 게 좋다 (코드 주석으로 명시).
+- [runtime] **backoff sleep 도중 mailbox 보존 자동.** `Effect.sleep(delay)` 는 fiber 만 잠. mailbox queue 의 message offer 는 그대로. sleep 후 새 incarnation 이 take. _Akka 동일 — 사용자 의식 X_. 통합 테스트 (`during-backoff-1/2`) 가 검증.
+- [runtime] **backoff sleep 도중 sys.shutdown 도 sleep 끝까지 기다림 — 단순 path.** `stopActor` 가 `fiber.await` 만 호출 (interrupt X, M3 ADR-031) 이라 sleep 깨우지 않음. maxBackoff 가 길면 (예: 1분) shutdown 도 1분. 의도된 trade-off, M∞ 본격 도그푸딩에서 표면 빈도 보고 race fix 결정. ADR-038 (-) 항목 명시.
+- [test] 9 테스트 추가 (총 182): 단위 4 (`Strategies.restart.backoff` 기본 null / `restartWithBackoff` 빌더 + 옵셔널 randomFactor / `.withLimit` chain) + `computeBackoffDelay` 단위 4 (attemptIndex 0/1/cap, jitter 범위) + 통합 5 (backoff 점진 증가, cap, mailbox 보존, withLimit chain stop 강등, 사이클 1 회귀). 5회 flake-free.
+- [process] 통합 테스트 시간 측정 (`Date.now()`) 의 정확도 — 60ms / 140ms 같은 _최소_ 임계값 사용. 정확한 비교 (예: ±5ms) 는 환경별 flake 위험. _최소만_ 검증이 안전.
+- [insight] **사이클 1 → 2 의 자연스러운 확장.** 사이클 1 의 `pendingRestartLimit` 옆에 `pendingRestartBackoff` 추가, restart 분기 한 군데에 sleep 단계 추가 — 두 fix 모두 _기존 코드 경로_ 위에 얹힘. ADR-037 의 _stop/cleanup 통일_ + ADR-038 의 _restart-cleanup-backoff 통일_ 모두 같은 가족. _아키텍처가 점진 확장 친화_ 라는 또 다른 사례.

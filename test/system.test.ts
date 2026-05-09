@@ -1462,3 +1462,236 @@ describe("M5 사이클 1 — restart.withLimit + PreRestart 재실패 (ADR-037)"
       }),
     ));
 });
+
+describe("M5 사이클 2 — restartWithBackoff (ADR-038)", () => {
+  it("backoff 점진 증가 — restart 간격이 시간순으로 늘어남 (minBackoff → 2x → 4x)", () =>
+    run(
+      Effect.gen(function* () {
+        const restartTimestamps: Array<number> = [];
+        const setup = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            restartTimestamps.push(Date.now());
+            return Behaviors.receiveMessage<string>((m) =>
+              m === "boom"
+                ? Effect.die(new Error("boom"))
+                : Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        // minBackoff=80ms, maxBackoff=1s, no jitter
+        const supervised = Behaviors.supervise(setup).onFailure(
+          Strategies.matchAll,
+          Strategies.restartWithBackoff({
+            minBackoff: "80 millis",
+            maxBackoff: "1 second",
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom"); // 1번째 fail → backoff 80ms → restart
+        yield* sys.root.tell("boom"); // 2번째 fail → backoff 160ms → restart
+        yield* sys.root.tell("boom"); // 3번째 fail → backoff 320ms → restart
+        yield* Effect.sleep("900 millis"); // 80 + 160 + 320 + 약간 여유
+
+        // restart 간격 측정 — 점진 증가 확인
+        expect(restartTimestamps.length).toBeGreaterThanOrEqual(4); // 첫 + 3 restart
+        const t0 = restartTimestamps[0]!;
+        const t1 = restartTimestamps[1]!;
+        const t2 = restartTimestamps[2]!;
+        const t3 = restartTimestamps[3]!;
+
+        // 첫 boom 처리는 spawn 직후 짧은 시간 안 일어남.
+        // restart 1: t1 - t0 ≈ 80ms (최소 60ms 여유)
+        // restart 2: t2 - t1 ≈ 160ms
+        // restart 3: t3 - t2 ≈ 320ms
+        expect(t1 - t0).toBeGreaterThanOrEqual(60);
+        expect(t2 - t1).toBeGreaterThanOrEqual(140);
+        expect(t3 - t2).toBeGreaterThanOrEqual(280);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("backoff cap — maxBackoff 초과 시 cap 됨", () =>
+    run(
+      Effect.gen(function* () {
+        const restartTimestamps: Array<number> = [];
+        const setup = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            restartTimestamps.push(Date.now());
+            return Behaviors.receiveMessage<string>((m) =>
+              m === "boom"
+                ? Effect.die(new Error("boom"))
+                : Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        // minBackoff=50ms, maxBackoff=120ms — 3번째 시도 (50*4=200) 가 cap=120
+        const supervised = Behaviors.supervise(setup).onFailure(
+          Strategies.matchAll,
+          Strategies.restartWithBackoff({
+            minBackoff: "50 millis",
+            maxBackoff: "120 millis",
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom");
+        yield* sys.root.tell("boom");
+        yield* sys.root.tell("boom");
+        yield* sys.root.tell("boom");
+        yield* Effect.sleep("700 millis");
+
+        expect(restartTimestamps.length).toBeGreaterThanOrEqual(5);
+
+        // 4번째 → 5번째 간격은 maxBackoff (120ms) cap. 200ms 안 넘어야.
+        const t3 = restartTimestamps[3]!;
+        const t4 = restartTimestamps[4]!;
+        expect(t4 - t3).toBeGreaterThanOrEqual(100);
+        expect(t4 - t3).toBeLessThan(200);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("backoff 도중 mailbox 보존 — sleep 중 도착한 메시지가 새 incarnation 에서 처리", () =>
+    run(
+      Effect.gen(function* () {
+        const seen: Array<string> = [];
+        const setup = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() =>
+            Behaviors.receiveMessage<string>((m) =>
+              Effect.sync(() => {
+                if (m === "boom") throw new Error("boom");
+                seen.push(m);
+                return Behaviors.same();
+              }),
+            ),
+          ),
+        );
+
+        const supervised = Behaviors.supervise(setup).onFailure(
+          Strategies.matchAll,
+          Strategies.restartWithBackoff({
+            minBackoff: "200 millis",
+            maxBackoff: "1 second",
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("a");
+        yield* sys.root.tell("boom"); // restart 트리거 + 200ms backoff
+        yield* sys.root.tell("during-backoff-1"); // backoff 도중 도착
+        yield* sys.root.tell("during-backoff-2"); // backoff 도중 도착
+        yield* Effect.sleep("400 millis"); // backoff (200) 끝나고 처리 충분히
+
+        // backoff 도중 도착한 메시지가 새 incarnation 에서 처리됨
+        expect(seen).toEqual(["a", "during-backoff-1", "during-backoff-2"]);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("backoff + withLimit chain — 한도 초과 시 stop 강등 (backoff sleep 안 함, 즉시 stop)", () =>
+    run(
+      Effect.gen(function* () {
+        const events: Array<string> = [];
+
+        type RootMsg = { readonly _tag: "Setup" };
+        let childRef: ActorRef<string> | null = null;
+
+        const child = Behaviors.receive<string>((_c, _m) =>
+          Effect.die(new Error("always-fail")),
+        ).receiveSignal((_c, sig) =>
+          Effect.sync(() => {
+            if (sig._tag === "PostStop") events.push("child:postStop");
+            return Behaviors.same();
+          }),
+        );
+
+        const supervised = Behaviors.supervise(child).onFailure(
+          Strategies.matchAll,
+          Strategies.restartWithBackoff({
+            minBackoff: "60 millis",
+            maxBackoff: "500 millis",
+          }).withLimit({
+            maxNrOfRetries: 1,
+            withinTimeRange: "5 seconds",
+          }),
+        );
+
+        const root = Behaviors.setup<RootMsg>((ctx) =>
+          Effect.gen(function* () {
+            const c = yield* ctx.spawn(supervised, "kid");
+            childRef = c;
+            return Behaviors.receive<RootMsg>((c2, _m) =>
+              Effect.gen(function* () {
+                yield* c2.watch(c);
+                yield* ctx.system.tell(c, "boom");
+                yield* ctx.system.tell(c, "boom");
+                return Behaviors.same();
+              }),
+            ).receiveSignal((_c, sig) =>
+              Effect.sync(() => {
+                if (sig._tag === "Terminated")
+                  events.push("root:terminated");
+                return Behaviors.same();
+              }),
+            );
+          }),
+        );
+
+        const sys = yield* ActorSystem.create<RootMsg>(root, "demo");
+        yield* sys.root.tell({ _tag: "Setup" });
+        yield* Effect.sleep("400 millis"); // 첫 backoff (60ms) + 한도 초과 stop
+
+        expect(events.filter((e) => e === "child:postStop").length).toBe(1);
+        expect(events.filter((e) => e === "root:terminated").length).toBe(1);
+
+        const resolved = yield* STM.commit(
+          Registry.resolve(sys.registry, childRef!.path),
+        );
+        expect(Option.isNone(resolved)).toBe(true);
+
+        yield* sys.shutdown;
+      }),
+    ));
+
+  it("회귀 — backoff 없는 restart (사이클 1) 즉시 restart 그대로", () =>
+    run(
+      Effect.gen(function* () {
+        const restartTimestamps: Array<number> = [];
+        const setup = Behaviors.setup<string>((_ctx) =>
+          Effect.sync(() => {
+            restartTimestamps.push(Date.now());
+            return Behaviors.receiveMessage<string>((m) =>
+              m === "boom"
+                ? Effect.die(new Error("boom"))
+                : Effect.succeed(Behaviors.same()),
+            );
+          }),
+        );
+
+        const supervised = Behaviors.supervise(setup).onFailure(
+          Strategies.matchAll,
+          Strategies.restart, // backoff 없음
+        );
+
+        const sys = yield* ActorSystem.create<string>(supervised, "demo");
+        yield* sys.root.tell("boom");
+        yield* sys.root.tell("boom");
+        yield* sys.root.tell("boom");
+        yield* Effect.sleep("100 millis");
+
+        expect(restartTimestamps.length).toBeGreaterThanOrEqual(4);
+        // restart 간격이 _짧음_ (즉시) — 50ms 안.
+        const t0 = restartTimestamps[0]!;
+        const tLast = restartTimestamps[restartTimestamps.length - 1]!;
+        expect(tLast - t0).toBeLessThan(50);
+
+        yield* sys.shutdown;
+      }),
+    ));
+});

@@ -1,10 +1,11 @@
-import { Cause, Chunk, Option, type Duration } from "effect";
+import { Cause, Chunk, Duration, Option } from "effect";
 
 // Supervision strategy ADT + 매처 + cause→error squash + rule 순회 (ADR-034, M4).
 // 사이클 1: ADT + 빌더. 사이클 2: pickStrategy 추가 (Resume 동작 분기 입력).
 // 사이클 3: Restart 분기에서 그대로 재사용.
 // 사이클 4: 매처 헬퍼 (matchTag, matchInstance 등) + 더 정교한 cause squash.
 // M5 사이클 1 (ADR-037): Restart 에 limit 추가 + Strategies.restart.withLimit 빌더.
+// M5 사이클 2 (ADR-038): Restart 에 backoff 추가 + Strategies.restartWithBackoff 빌더.
 
 // withLimit 옵션 — Akka 의 (maxNrOfRetries, withinTimeRange) 같은 의미.
 // 슬라이딩 윈도우 안에서 maxNrOfRetries 초과 시 stop 강등.
@@ -14,11 +15,24 @@ export interface RestartLimit {
   readonly withinTimeRange: Duration.DurationInput;
 }
 
+// M5 사이클 2 (ADR-038): backoff 옵션 — Akka 의 restartWithBackoff(min, max, randomFactor) 모양.
+// minBackoff: 첫 fail 후 sleep. maxBackoff: 점진 증가의 cap. randomFactor: jitter (Akka 정통 + 방향만).
+export interface BackoffConfig {
+  readonly minBackoff: Duration.DurationInput;
+  readonly maxBackoff: Duration.DurationInput;
+  readonly randomFactor: number;
+}
+
 // Strategy ADT — Akka Typed 의 SupervisorStrategy.{resume, restart, stop} 매핑.
 // Restart 의 limit: null = 무한 (Akka 기본). RestartLimit = 슬라이딩 윈도우 한도.
+// Restart 의 backoff: null = 즉시 restart (사이클 1 그대로). BackoffConfig = 점진 sleep.
 export type Strategy =
   | { readonly _tag: "Resume" }
-  | { readonly _tag: "Restart"; readonly limit: RestartLimit | null }
+  | {
+      readonly _tag: "Restart";
+      readonly limit: RestartLimit | null;
+      readonly backoff: BackoffConfig | null;
+    }
   | { readonly _tag: "Stop" };
 
 // 종결자 같은 패턴 — 참조 동일성 유지 (매번 새 객체 만들 필요 없음).
@@ -31,10 +45,51 @@ const RESTART_BASE: Strategy & {
 } = {
   _tag: "Restart",
   limit: null,
+  backoff: null,
   withLimit: (limit: RestartLimit): Strategy => ({
     _tag: "Restart",
     limit,
+    backoff: null,
   }),
+};
+
+// M5 사이클 2 (ADR-038): Strategies.restartWithBackoff 빌더.
+// 반환은 사이클 1 의 restart 와 동형 — Strategy + withLimit 메서드. .withLimit chain 가능.
+const restartWithBackoff = (opts: {
+  readonly minBackoff: Duration.DurationInput;
+  readonly maxBackoff: Duration.DurationInput;
+  readonly randomFactor?: number;
+}): Strategy & { readonly withLimit: (limit: RestartLimit) => Strategy } => {
+  const backoff: BackoffConfig = {
+    minBackoff: opts.minBackoff,
+    maxBackoff: opts.maxBackoff,
+    randomFactor: opts.randomFactor ?? 0,
+  };
+  return {
+    _tag: "Restart",
+    limit: null,
+    backoff,
+    withLimit: (limit: RestartLimit): Strategy => ({
+      _tag: "Restart",
+      limit,
+      backoff,
+    }),
+  };
+};
+
+// computeBackoffDelay — attemptIndex (0-based) 와 BackoffConfig 로 Duration 계산.
+// Akka 정통: delay = min(minBackoff * 2^attemptIndex, maxBackoff) * (1 + random * randomFactor).
+// jitter 는 + 방향만 (Akka 그대로) — - 방향 jitter 면 sleep 너무 짧아 의미 없음.
+export const computeBackoffDelay = (
+  attemptIndex: number,
+  cfg: BackoffConfig,
+): Duration.Duration => {
+  const minMs = Duration.toMillis(Duration.decode(cfg.minBackoff));
+  const maxMs = Duration.toMillis(Duration.decode(cfg.maxBackoff));
+  const exp = Math.min(minMs * Math.pow(2, attemptIndex), maxMs);
+  const jittered =
+    cfg.randomFactor > 0 ? exp * (1 + Math.random() * cfg.randomFactor) : exp;
+  return Duration.millis(Math.max(0, Math.floor(jittered)));
 };
 
 // 매처 헬퍼 (ADR-036, M4 사이클 4) — Akka 의 `[E]` 타입 매칭 표면을 TS 로 옮긴 합성 함수.
@@ -65,6 +120,7 @@ export const Strategies = {
   resume: RESUME,
   restart: RESTART_BASE,
   stop: STOP,
+  restartWithBackoff,
   matchInstance,
   matchTag,
   matchAll,

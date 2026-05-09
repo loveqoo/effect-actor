@@ -5,8 +5,12 @@ import type { ActorEntry } from "./entry.js";
 import { DeathPactException, RestartLimitExceeded } from "./errors.js";
 import type { Signal } from "./signal.js";
 import { Signal as SignalNs } from "./signal.js";
-import type { RestartLimit, SupervisorRule } from "./supervision.js";
-import { pickStrategy } from "./supervision.js";
+import type {
+  BackoffConfig,
+  RestartLimit,
+  SupervisorRule,
+} from "./supervision.js";
+import { computeBackoffDelay, pickStrategy } from "./supervision.js";
 
 // 한 메시지를 한 Behavior 에 적용해 _다음_ Behavior 계산.
 // Setup/WithMailbox 는 spawn 0단계에서 풀려 도달 안 함 — 도달하면 invariant violation, 안전하게 그대로.
@@ -156,6 +160,8 @@ const messageLoop = <Msg>(
       let stopCause: Cause.Cause<unknown> | null = null;
       // M5 사이클 1: restart 분기 진입 시점의 limit (한도 검사 입력).
       let pendingRestartLimit: RestartLimit | null = null;
+      // M5 사이클 2: restart 분기 진입 시점의 backoff (sleep 입력).
+      let pendingRestartBackoff: BackoffConfig | null = null;
 
       while (
         current._tag !== "Stopped" &&
@@ -192,6 +198,7 @@ const messageLoop = <Msg>(
         if (strategy._tag === "Restart") {
           needRestart = true;
           pendingRestartLimit = strategy.limit;
+          pendingRestartBackoff = strategy.backoff;
           break;
         }
         // Stop / 미매치
@@ -206,37 +213,54 @@ const messageLoop = <Msg>(
       }
 
       if (needRestart) {
-        // M5 사이클 1: 한도 검사 (Akka 정통 — restart 시도 _자체_ 가 카운트).
+        // M5 사이클 1+2 (ADR-037, ADR-038): restart 시도 카운트 — 한도 검사 + backoff attemptIndex 둘 다 입력.
+        // _항상_ push (limit 무관). limit 있을 때만 윈도우 슬라이드. backoff 만 있어도 attemptIndex 정상 증가.
+        const now = yield* Clock.currentTimeMillis;
+        let windowMs = 0;
         if (pendingRestartLimit !== null) {
-          const now = yield* Clock.currentTimeMillis;
-          const windowMs = Duration.toMillis(
+          windowMs = Duration.toMillis(
             Duration.decode(pendingRestartLimit.withinTimeRange),
           );
-          // 윈도우 _밖_ timestamp 슬라이드 제거.
           while (
             restartHistory.length > 0 &&
             now - restartHistory[0]! > windowMs
           ) {
             restartHistory.shift();
           }
-          restartHistory.push(now);
+        }
+        restartHistory.push(now);
 
-          if (restartHistory.length > pendingRestartLimit.maxNrOfRetries) {
-            // 한도 초과 → stop 강등. cause = RestartLimitExceeded (defect).
-            needRestart = false;
-            needStop = true;
-            stopCause = Cause.die(
-              new RestartLimitExceeded({
-                path: ctx.self.path,
-                maxNrOfRetries: pendingRestartLimit.maxNrOfRetries,
-                windowMillis: windowMs,
-                attemptCount: restartHistory.length,
-              }),
-            );
-          }
+        // 한도 검사 (limit 있을 때만).
+        if (
+          pendingRestartLimit !== null &&
+          restartHistory.length > pendingRestartLimit.maxNrOfRetries
+        ) {
+          // 한도 초과 → stop 강등. cause = RestartLimitExceeded (defect).
+          needRestart = false;
+          needStop = true;
+          stopCause = Cause.die(
+            new RestartLimitExceeded({
+              path: ctx.self.path,
+              maxNrOfRetries: pendingRestartLimit.maxNrOfRetries,
+              windowMillis: windowMs,
+              attemptCount: restartHistory.length,
+            }),
+          );
         }
 
         if (needRestart) {
+          // M5 사이클 2 (ADR-038): backoff sleep — 한도 검사 통과 후 PreRestart 전.
+          // attemptIndex = restartHistory.length - 1 (push 후 length, 0-based 변환).
+          // sleep 도중 mailbox 는 그대로 — 새 incarnation 이 처리 (Akka 동일).
+          if (pendingRestartBackoff !== null) {
+            const attemptIndex = Math.max(0, restartHistory.length - 1);
+            const delay = computeBackoffDelay(
+              attemptIndex,
+              pendingRestartBackoff,
+            );
+            yield* Effect.sleep(delay);
+          }
+
           // M5 사이클 1 (의제 3): PreRestart 재실패 → stop 강등.
           // PreRestart 의 fail 을 캡처 — 외부 propagate 대신 cleanup 통일 경로로.
           const preRestartExit = yield* Effect.exit(

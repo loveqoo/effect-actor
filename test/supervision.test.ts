@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { Cause, Effect } from "effect";
+import { Cause, Duration, Effect } from "effect";
 import { Behaviors, unwrapMeta } from "../src/behavior.js";
 import { DeathPactException } from "../src/errors.js";
 import { MailboxPolicy } from "../src/mailbox.js";
 import { ActorPath } from "../src/path.js";
-import { pickStrategy, Strategies } from "../src/supervision.js";
+import {
+  computeBackoffDelay,
+  pickStrategy,
+  Strategies,
+} from "../src/supervision.js";
 import { ActorSystem } from "../src/system.js";
 
 const run = <A, E>(eff: Effect.Effect<A, E>): Promise<A> =>
@@ -62,6 +66,101 @@ describe("Strategy ADT (ADR-034)", () => {
     // 단 _구조_ 는 같음
     if (a._tag === "Restart" && b._tag === "Restart") {
       expect(a.limit?.maxNrOfRetries).toBe(b.limit?.maxNrOfRetries);
+    }
+  });
+
+  // M5 사이클 2 (ADR-038)
+  it("Strategies.restart 의 backoff 기본값은 null (즉시 restart)", () => {
+    if (Strategies.restart._tag === "Restart") {
+      expect(Strategies.restart.backoff).toBeNull();
+    }
+  });
+
+  it("Strategies.restartWithBackoff({ ... }) — backoff 채워진 새 Strategy + withLimit 빌더", () => {
+    const s = Strategies.restartWithBackoff({
+      minBackoff: "100 millis",
+      maxBackoff: "2 seconds",
+      randomFactor: 0.2,
+    });
+
+    expect(s._tag).toBe("Restart");
+    if (s._tag === "Restart") {
+      expect(s.limit).toBeNull();
+      expect(s.backoff).not.toBeNull();
+      expect(s.backoff?.minBackoff).toBe("100 millis");
+      expect(s.backoff?.maxBackoff).toBe("2 seconds");
+      expect(s.backoff?.randomFactor).toBe(0.2);
+    }
+    expect(typeof s.withLimit).toBe("function");
+  });
+
+  it("Strategies.restartWithBackoff — randomFactor 미지정 시 기본 0", () => {
+    const s = Strategies.restartWithBackoff({
+      minBackoff: "100 millis",
+      maxBackoff: "2 seconds",
+    });
+    if (s._tag === "Restart") {
+      expect(s.backoff?.randomFactor).toBe(0);
+    }
+  });
+
+  it("Strategies.restartWithBackoff(...).withLimit(...) — backoff + limit 둘 다 부착", () => {
+    const s = Strategies.restartWithBackoff({
+      minBackoff: "50 millis",
+      maxBackoff: "500 millis",
+    }).withLimit({ maxNrOfRetries: 3, withinTimeRange: "10 seconds" });
+
+    if (s._tag === "Restart") {
+      expect(s.backoff).not.toBeNull();
+      expect(s.limit).not.toBeNull();
+      expect(s.limit?.maxNrOfRetries).toBe(3);
+      expect(s.backoff?.minBackoff).toBe("50 millis");
+    }
+  });
+});
+
+describe("computeBackoffDelay — 점진 증가 + cap + jitter (ADR-038)", () => {
+  it("attemptIndex 0 → minBackoff (jitter 없음)", () => {
+    const cfg = {
+      minBackoff: "100 millis" as const,
+      maxBackoff: "2 seconds" as const,
+      randomFactor: 0,
+    };
+    const d = computeBackoffDelay(0, cfg);
+    expect(Number(Duration.toMillis(d))).toBe(100);
+  });
+
+  it("attemptIndex 1 → 2 * minBackoff", () => {
+    const cfg = {
+      minBackoff: "100 millis" as const,
+      maxBackoff: "2 seconds" as const,
+      randomFactor: 0,
+    };
+    const d = computeBackoffDelay(1, cfg);
+    expect(Number(Duration.toMillis(d))).toBe(200);
+  });
+
+  it("attemptIndex 큼 → maxBackoff cap", () => {
+    const cfg = {
+      minBackoff: "100 millis" as const,
+      maxBackoff: "1 second" as const,
+      randomFactor: 0,
+    };
+    const d = computeBackoffDelay(20, cfg); // 100 * 2^20 = 100M ms 이지만 cap = 1000
+    expect(Number(Duration.toMillis(d))).toBe(1000);
+  });
+
+  it("randomFactor > 0 → exp ~ exp*(1+factor) 범위 (Akka 정통: + 방향만)", () => {
+    const cfg = {
+      minBackoff: "100 millis" as const,
+      maxBackoff: "1 second" as const,
+      randomFactor: 0.5,
+    };
+    // 100 회 반복으로 분포 확인
+    for (let i = 0; i < 50; i++) {
+      const d = Number(Duration.toMillis(computeBackoffDelay(0, cfg)));
+      expect(d).toBeGreaterThanOrEqual(100); // exp = 100
+      expect(d).toBeLessThanOrEqual(150); // exp * (1 + 0.5)
     }
   });
 });
