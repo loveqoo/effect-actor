@@ -8,7 +8,7 @@
 
 | Item | Value |
 |---|---|
-| Version | [`0.1.0`](https://www.npmjs.com/package/@loveqoo/effect-actor) — first public release (2026-05-10) |
+| Version | [`0.1.1`](https://www.npmjs.com/package/@loveqoo/effect-actor) — docs-only patch over 0.1.0 (2026-05-10) |
 | Milestones | M0~M5 + M∞ (publish) + M∞.1 (review-feedback hardening, ADR-043/044/045) all 🟢 |
 | Tests | 215 passing, 5× flake-free. Consumer-side dogfooding: #4 (15 runs flake-free, in-tree) + #5 (npm-install packaging passed) |
 | External review | `codex review` — 3 rounds, final GATE: PASS |

@@ -8,11 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+_Pending changes here._
+
+## [0.1.1] - 2026-05-10
+
+Documentation-only patch (no library code changes — same runtime as 0.1.0).
+
 ### Added
 - `examples/09-tagged-enum.ts` — `Data.TaggedEnum` (Effect) 로 메시지 ADT 정의 패턴. constructor + `$match` 자동, `{ _tag: "Foo" }` 리터럴 반복 줄임. effect-actor 자체는 메시지 모양에 의견 없음 — 사용자 도메인이라 리터럴 / const factory / `Data.TaggedEnum` 모두 OK.
 
 ### Changed
 - `examples/01-counter.ts`, `02-lifecycle.ts`, `03-watch.ts`, `04-ask.ts`, `05-restart.ts`, `06-backoff.ts`, `07-stash.ts`, `08-timer.ts` — 메시지 정의를 `Data.TaggedEnum` 으로 일괄 변형. `switch` 대신 `$match` 로 분기 — 새 case 추가 시 컴파일 강제 (exhaustiveness). `worker` (string), `reporter` (number) 같은 _값 메시지_ 는 그대로 (taggedEnum 부적합). 기능 변화 없음, 모든 example 출력 동일.
+
+### Documentation
+- README + README.ko 최신화 — 0.1.0 publish 사실 반영, M∞.1 환류 사이클 (ADR-043/044/045) + 도그푸딩 #5 결과, codex review 3 라운드 GATE PASS, ADR 범위 042 → 045, examples 카운트 08 → 09.
+- README quickstart 코드 → `Data.TaggedEnum` 패턴 (examples/09 와 일관).
+- README + `docs/` 의 사용자 내부 작업장명 일괄 제거 — 외부 사용자에 의미 없는 내부 이름을 일반 단어 (_consumer_, _초기 실험_) 로 대체.
+- `docs/` 의 _환류_ → _후속_ 일괄 (영어 직역체 정리).
 
 ## [0.1.0] - 2026-05-10
 
@@ -87,5 +99,6 @@ First public release. Output of milestones M0 through M5 plus the M∞.1 review-
 - `effect@^3.10.0` as peer dependency.
 - Built with `tsc` (ADR-042). `dist/` includes `.d.ts.map` for IDE go-to-definition into source.
 
-[Unreleased]: https://github.com/loveqoo/effect-actor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/loveqoo/effect-actor/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/loveqoo/effect-actor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/loveqoo/effect-actor/releases/tag/v0.1.0

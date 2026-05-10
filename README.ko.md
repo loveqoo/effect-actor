@@ -6,7 +6,7 @@
 
 | 항목 | 상태 |
 |---|---|
-| 버전 | [`0.1.0`](https://www.npmjs.com/package/@loveqoo/effect-actor) — 첫 공개 배포 (2026-05-10) |
+| 버전 | [`0.1.1`](https://www.npmjs.com/package/@loveqoo/effect-actor) — 0.1.0 위 docs-only patch (2026-05-10) |
 | 마일스톤 | **M0~M5 + M∞ + M∞.1 모두 🟢** — 도그푸딩 5라운드 + codex 3라운드 GATE PASS |
 | npm 패키지 | `@loveqoo/effect-actor` — `pnpm add @loveqoo/effect-actor effect` |
 | 테스트 | 215 자체 테스트, 5회 flake-free. consumer 측 도그푸딩 #4 (5×3=15회 flake-free, in-tree) + #5 (npm-install packaging 통과) |
