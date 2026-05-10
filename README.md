@@ -8,10 +8,11 @@
 
 | Item | Value |
 |---|---|
-| Version | `0.0.0` (not yet published) |
-| Milestones | M0~M5 complete (5-cycle dogfooding passed). M∞ (npm publish) in progress |
-| Tests | 201 passing, 5×3 = 15 flake-free runs in consumer (poly-phony) |
-| Surface | `spawn` / `tell` / `receive` / `setup` / `watch` / `watchWith` / `ask` / `supervise` / `restart` / `restartWithBackoff` / `withLimit` / `withTimers` / `withStash` / `ctx.fork` / `ctx.scheduleOnce` |
+| Version | [`0.1.0`](https://www.npmjs.com/package/@loveqoo/effect-actor) — first public release (2026-05-10) |
+| Milestones | M0~M5 + M∞ (publish) + M∞.1 (review-feedback hardening, ADR-043/044/045) all 🟢 |
+| Tests | 215 passing, 5× flake-free. Consumer (poly-phony): dogfooding #4 (15 runs flake-free) + #5 (npm-install packaging passed) |
+| External review | `codex review` — 3 rounds, final GATE: PASS |
+| Surface | `spawn` / `tell` / `receive` / `setup` / `watch` / `watchWith` / `unwatch` / `watchTerminated` / `ask` / `supervise` / `restart` / `restartWithBackoff` / `withLimit` / `withTimers` / `withStash` / `ctx.fork` / `ctx.scheduleOnce` |
 
 ## What is this
 
@@ -27,31 +28,41 @@ When that one line holds, the rest follows:
 
 This project came out of an earlier attempt ([poly-phony](../poly-phony)) where the above guarantees were absent. The gap analysis is in [docs/AKKA_REFERENCE.md § 10](./docs/AKKA_REFERENCE.md#10-polyphony와의-비교).
 
+## Install
+
+```bash
+pnpm add @loveqoo/effect-actor effect
+# npm users: --legacy-peer-deps may be needed depending on your effect resolution
+```
+
 ## Quick start
 
-> _Not yet on npm._ Will be published as `@loveqoo/effect-actor` once M∞ closes.
-
 ```typescript
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { ActorSystem, Behaviors } from "@loveqoo/effect-actor";
 
-type Msg = { _tag: "Inc" } | { _tag: "Show" };
+// Messages as a tagged ADT (Effect's Data.TaggedEnum — see examples/09)
+type Msg = Data.TaggedEnum<{ Inc: {}; Show: {} }>;
+const Msg = Data.taggedEnum<Msg>();
 
 const counter = (n: number) =>
-  Behaviors.receive<Msg>((_ctx, msg) => {
-    if (msg._tag === "Inc") return Effect.succeed(counter(n + 1));
-    return Effect.sync(() => {
-      console.log(`current count: ${n}`);
-      return counter(n);
-    });
-  });
+  Behaviors.receive<Msg>((_ctx, msg) =>
+    Msg.$match(msg, {
+      Inc: () => Effect.succeed(counter(n + 1)),
+      Show: () =>
+        Effect.sync(() => {
+          console.log(`current count: ${n}`);
+          return counter(n);
+        }),
+    }),
+  );
 
 const program = Effect.gen(function* () {
   const sys = yield* ActorSystem.create<Msg>(counter(0), "demo");
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Inc" });
-  yield* sys.root.tell({ _tag: "Show" });
+  yield* sys.root.tell(Msg.Inc());
+  yield* sys.root.tell(Msg.Inc());
+  yield* sys.root.tell(Msg.Inc());
+  yield* sys.root.tell(Msg.Show());
   yield* Effect.sleep("50 millis");
   yield* sys.shutdown;
 });
@@ -60,7 +71,7 @@ Effect.runPromise(program);
 // → current count: 3
 ```
 
-More patterns in [examples/](./examples) (01-counter through 08-timer).
+More patterns in [examples/](./examples) (01-counter through 09-tagged-enum). Plain `{ _tag: "Inc" }` literals work too — `Data.TaggedEnum` is one option, not a requirement.
 
 ## Magic moment
 
@@ -87,7 +98,8 @@ See [examples/05-restart.ts](./examples/05-restart.ts) for the working demo.
 | M3.1 | ✅ | spawn race fix (Deferred latch + Effect 3.21.2 `TMap.remove` workaround) |
 | M4 | ✅ | Supervision (`resume` / `restart` / `stop`) + matcher helpers + Scope split |
 | M5 | ✅ | `restartWithBackoff` + `.withLimit` + `withTimers` + `withStash` + `ctx.fork` + `ctx.scheduleOnce` + Effect-outside-throw safety net |
-| M∞ | 🟡 | npm publish (semver ✅, build ✅, English README ✅, CHANGELOG ✅, first publish pending) |
+| M∞ | ✅ | semver (ADR-041) + tsc build (ADR-042) + English README + CHANGELOG + CONTRIBUTING + 0.1.0 published 2026-05-10 |
+| M∞.1 | ✅ | Review-feedback hardening — interpreter cleanup single source (ADR-043), spawn/watch race-free atomic STM (ADR-044), `Terminated` semantics + spawn-fail cleanup (ADR-045). 5 cycles, codex 3 rounds GATE PASS, dogfooding #5 packaging passed |
 
 Detailed progress: [docs/PLAN.md](./docs/PLAN.md). All design decisions: [docs/DECISIONS.md](./docs/DECISIONS.md) (ADRs in Korean).
 
@@ -124,9 +136,10 @@ Korean is canonical (the project's working language). English README is the entr
 - [docs/API.md](./docs/API.md) — API sketch + examples
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — internal runtime model
 - [docs/AKKA_REFERENCE.md](./docs/AKKA_REFERENCE.md) — Akka Typed → EffectTS mapping
-- [docs/DECISIONS.md](./docs/DECISIONS.md) — ADRs (ADR-001 ~ ADR-042)
+- [docs/DECISIONS.md](./docs/DECISIONS.md) — ADRs (ADR-001 ~ ADR-045)
 - [docs/LEARNINGS.md](./docs/LEARNINGS.md) — accumulated learnings
 - [docs/DOGFOODING.md](./docs/DOGFOODING.md) — dogfooding history + guide
+- [CHANGELOG.md](./CHANGELOG.md) — release notes (Keep a Changelog)
 - [AGENTS.md](./AGENTS.md) — entry point for AI agents
 
 ## Persona
