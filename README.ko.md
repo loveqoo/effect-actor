@@ -10,7 +10,7 @@
 | 마일스톤 | **M0~M5 + M∞ + M∞.1 모두 🟢** — 도그푸딩 5라운드 + codex 3라운드 GATE PASS |
 | npm 패키지 | `@loveqoo/effect-actor` — `pnpm add @loveqoo/effect-actor effect` |
 | 테스트 | 215 자체 테스트, 5회 flake-free. consumer 측 도그푸딩 #4 (5×3=15회 flake-free, in-tree) + #5 (npm-install packaging 통과) |
-| 코드 | M5 표면 + M∞.1 환류 (ADR-043/044/045 — interpreter cleanup 단일 source, spawn/watch race-free atomic STM, Terminated semantics + spawn-fail cleanup). examples/01~09 실행 가능. |
+| 코드 | M5 표면 + M∞.1 후속 (ADR-043/044/045 — interpreter cleanup 단일 source, spawn/watch race-free atomic STM, Terminated semantics + spawn-fail cleanup). examples/01~09 실행 가능. |
 
 ## 무엇인가
 
@@ -49,10 +49,10 @@ EffectTS 위에 [Akka Typed](https://doc.akka.io/docs/akka/current/typed/index.h
 | M2 | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook. 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계 |
 | M3 | 🟢 완료 | ctx.stop graceful + watch / watchWith / watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1 | 🟢 완료 | spawn race fix — Deferred latch happens-before + Effect 3.21.2 TMap.remove 본체 버그 우회. 118 테스트, consumer 측 9ms / 5회 flake-free 검증 |
-| M4 | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 + 환류 fix (F1 / 의제 1+2). examples/05 동작. 161 테스트, consumer 측 25회 flake-free. |
+| M4 | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 + 후속 fix (F1 / 의제 1+2). examples/05 동작. 161 테스트, consumer 측 25회 flake-free. |
 | M5 | 🟢 완료 | Backoff / Stash / Timer + examples 06~08 + Effect 밖 throw 안전망 (ADR-037~040). 201 테스트. **도그푸딩 #4 통과 (5×3=15회 flake-free, finding 0, 회귀 0).** |
 | M∞ | 🟢 완료 | semver (ADR-041) + tsc 빌드 (ADR-042) + 영어 README + CHANGELOG + CONTRIBUTING + **0.1.0 publish (2026-05-10)**. |
-| M∞.1 | 🟢 완료 | Review-feedback 환류 — interpreter cleanup 단일 source (ADR-043), spawn/watch race-free atomic STM (ADR-044), Terminated semantics + spawn-fail cleanup (ADR-045). 5 사이클, codex 3 라운드 GATE PASS, 도그푸딩 #5 packaging 통과. |
+| M∞.1 | 🟢 완료 | Review-feedback 후속 — interpreter cleanup 단일 source (ADR-043), spawn/watch race-free atomic STM (ADR-044), Terminated semantics + spawn-fail cleanup (ADR-045). 5 사이클, codex 3 라운드 GATE PASS, 도그푸딩 #5 packaging 통과. |
 
 자세한 진행 상황은 [docs/PLAN.md](./docs/PLAN.md).
 

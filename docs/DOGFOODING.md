@@ -10,12 +10,12 @@
 | # | 시점 | 시기 | 결과 요약 |
 |---|---|---|---|
 | #1 | M2 끝 | 2026-05-09 | 4 결정 입력 → ADR-028~031 |
-| #2 | M3 끝 | 2026-05-09 | 5 사이클 / 9 테스트 / 1 BUG (spawn race) → M3.1 환류 |
-| #3 | M4 끝 | 2026-05-09 | 5 사이클 / 4 finding → M4.1 환류 (cleanup 통일) |
+| #2 | M3 끝 | 2026-05-09 | 5 사이클 / 9 테스트 / 1 BUG (spawn race) → M3.1 후속 |
+| #3 | M4 끝 | 2026-05-09 | 5 사이클 / 4 finding → M4.1 후속 (cleanup 통일) |
 | #4 | **M5 끝** | 2026-05-09 | **통과** — 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. 5 cliff 모두 안정. M5 _전체_ DoD 🟢. M∞ 진입 가능. |
 | #5 | **0.1.0 배포 직후** | 2026-05-10 | **통과** — 2 사이클, finding 0, 회귀 0, 3회 flake-free. `npm install` (legacy-peer-deps) → import / tsc strict / 실행 모두 OK. `.d.ts.map` 포함 IDE 친화. 도메인 사이클 (ADR-045 watchTerminated + 재spawn) 정확. **0.1.0 packaging DoD 🟢.** |
 
-#1~#3 은 _가벼운 도그푸딩_ (~1주 한정). **#4 부터 _본격_** — poly-phony 가 effect-actor 위에 _진짜 agent_ 를 만들면서 _모든 표면_ (M1~M5) 사용. 환류 사이클 (M5.1+) 가능성 열어둠.
+#1~#3 은 _가벼운 도그푸딩_ (~1주 한정). **#4 부터 _본격_** — poly-phony 가 effect-actor 위에 _진짜 agent_ 를 만들면서 _모든 표면_ (M1~M5) 사용. 후속 사이클 (M5.1+) 가능성 열어둠.
 
 **#5 는 _packaging 검증_ 중심** — 기능은 #4 가 검증. #5 의 초점은 _배포한 코드_ 가 _진짜 npm 환경_ 에서 동작하는지. 가벼움 (1-2 사이클).
 
@@ -225,7 +225,7 @@ const orchestrator = Behaviors.setup<OrchMsg>((ctx) =>
 - ... (cliff, 잠재 의제)
 
 [권장 후속]
-- (a) 라이브러리 환류 fix 후보
+- (a) 라이브러리 후속 fix 후보
 - (b) USAGE 보강
 - (c) M∞ 까지 미룸
 ```
@@ -236,7 +236,7 @@ const orchestrator = Behaviors.setup<OrchMsg>((ctx) =>
 
 라이브러리 측 처리 (M3.1 / M4.1 패턴):
 - finding 모두 _가설_ + _라이브러리 측 실측_ 으로 검증 (도그푸딩 #3 의 _single root cause_ 가설 검증 패턴 그대로)
-- 환류 사이클 (M5.1) 진입 — fix + 회귀 테스트 + 재검증
+- 후속 사이클 (M5.1) 진입 — fix + 회귀 테스트 + 재검증
 - 모든 finding closed → M5 _전체_ DoD 🟢
 
 표면 어색 / cliff:
@@ -247,7 +247,7 @@ const orchestrator = Behaviors.setup<OrchMsg>((ctx) =>
 
 ADR-024 의 _M5 끝_ 본격 도그푸딩 시점 = npm 배포 직전 마지막 검증.
 
-- M5.1 환류 사이클 모두 closed 후 → M∞ 진입 (semver 정책 결정 + 영어 README + CHANGELOG + setup-deploy)
+- M5.1 후속 사이클 모두 closed 후 → M∞ 진입 (semver 정책 결정 + 영어 README + CHANGELOG + setup-deploy)
 - 0.1.0 첫 배포 — _도그푸딩 통과한 표면_ 그대로
 - 도그푸딩 #5+ 는 _배포 후_ 사용자 측 issue 입력 (GitHub) 으로 넘어감
 

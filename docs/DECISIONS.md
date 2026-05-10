@@ -1082,7 +1082,7 @@ Behaviors.supervise(b)
 - 출처: M5 사이클 1 — `Strategies.restart.withLimit` 도입 + 의제 3 (PreRestart 재실패) 묶음
 
 ### 맥락
-M4 환류 사이클 2 에서 _stop/cleanup 경로 정합성_ 단일화 (`onSelfTermination` + PostStop hook 단일 source of truth). 그 직후 M5 진입 시점에 다음 두 사실을 인지:
+M4 후속 사이클 2 에서 _stop/cleanup 경로 정합성_ 단일화 (`onSelfTermination` + PostStop hook 단일 source of truth). 그 직후 M5 진입 시점에 다음 두 사실을 인지:
 
 1. **`withLimit` 의 한도 초과** = restart loop 안에서 _stop 강등_ — 기존 supervisor stop 강등 경로 (`needStop` 분기) 와 _semantic 동일_.
 2. **의제 3 (PreRestart 재실패)** = restart 흐름 도중 _stop 강등_ — 위와 같은 분기.

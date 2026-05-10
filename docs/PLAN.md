@@ -16,9 +16,9 @@
 | M2. Lifecycle | 🟢 완료 | receiveSignal + signal 우선 폴링 + PostStop hook (자동 + 외부 emit). 99 테스트, examples/02 동작. 도그푸딩 _시작_ 단계. |
 | M3. Stop + Watch + Ask | 🟢 완료 | ctx.stop graceful cascade + watch/watchWith/unwatch + watchTerminated + ask + ChildFailed + DeathPact. examples/03,04 동작. |
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
-| M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
+| M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 후속 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
 | M5. 고급 기능 | 🟢 완료 | Backoff / withLimit / Stash / Timer + examples 06~08 + Effect 밖 throw 안전망. ADR-037~040. 201 테스트. **도그푸딩 #4 통과 — finding 0, 회귀 0, 5×3=15회 flake-free.** |
-| M∞. 출시 | 🟢 완료 | (a)~(g) 모두 ✅, **0.1.0 배포 (2026-05-10)**, M∞.1 환류 5 사이클 모두 closed (codex 3 라운드 GATE PASS), **도그푸딩 #5 packaging 통과 (finding 0)**. 후속: (d) Effect TMap upstream PR 은 별도 의제로 분리 — 우리 측 우회 (ADR-031 보강) 으로 0.1.0 동작 확인. |
+| M∞. 출시 | 🟢 완료 | (a)~(g) 모두 ✅, **0.1.0 배포 (2026-05-10)**, M∞.1 후속 5 사이클 모두 closed (codex 3 라운드 GATE PASS), **도그푸딩 #5 packaging 통과 (finding 0)**. 후속: (d) Effect TMap upstream PR 은 별도 의제로 분리 — 우리 측 우회 (ADR-031 보강) 으로 0.1.0 동작 확인. |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
 
@@ -154,7 +154,7 @@
 - [x] `examples/04-ask.ts` — ask 패턴 + AskTimeout 캐치
 - [x] `ctx.stop` 의 graceful cascade 동작 (자식 PostStop 호출 검증, ADR-031)
 - [x] DeathPact 검출 (watch + Unhandled Terminated → fail → 부모 ChildFailed 연쇄, ADR-022)
-- [x] **M3 끝 도그푸딩 (ADR-024)** — 도그푸딩 #2 5 사이클 완료. wrapper 3종 (typed err / Stream pass-through / watch+ask race) 검증, factory 패턴 표준 확정, spawn race BUG 발견 → M3.1 환류로 fix.
+- [x] **M3 끝 도그푸딩 (ADR-024)** — 도그푸딩 #2 5 사이클 완료. wrapper 3종 (typed err / Stream pass-through / watch+ask race) 검증, factory 패턴 표준 확정, spawn race BUG 발견 → M3.1 후속로 fix.
 - [x] **M3.1 사이클 1 — spawn race fix** — 두 layer fix 완료, consumer 측 9ms / 5회 flake-free 재검증.
 
 **완료된 사이클:**
@@ -165,10 +165,10 @@
 - 🟢 사이클 5 — ChildFailed signal + DeathPact: runInterpreter 의 onFailure hook + interpretSignalStep 의 unhandled 검출. 3 테스트
 - 🟢 사이클 6 — `examples/03-watch.ts` + `examples/04-ask.ts` + USAGE.md 갱신. 누적 115 테스트.
 
-**M3.1 사이클 (도그푸딩 #2 환류):**
+**M3.1 사이클 (도그푸딩 #2 후속):**
 - 🟢 사이클 1 — spawn happens-before contract (Deferred latch) + sibling LIFO cascade (Chunk) + Effect 3.21.2 `TMap.remove` 본체 버그 우회 (TRef<HashMap>). ADR-031 보강 절 3개. 누적 118 테스트. 사용자 표면 변경 0.
 
-**M3 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 환류 fix + 재검증 모두 충족.
+**M3 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 후속 fix + 재검증 모두 충족.
 
 ---
 
@@ -199,8 +199,8 @@
 
 **마일스톤 완료 조건 (DoD) — 모두 충족 ✅:**
 - [x] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증 (사이클 5)
-- [x] **M4 끝 도그푸딩 (~1주, ADR-024)** — poly-phony 측 5 사이클 완료. 핵심 약속 9개 중 ✅ 8 + ⚠️ 1, 의제 1·2 노출 확정 + F1 신규 BUG (sys.shutdown hang when watchWith). 환류 fix → M4.1.
-- [x] **M4.1 환류 fix + 재검증** — 4개 finding (F1 + 의제 1 + 의제 2 + F2) 모두 closed, consumer 측 5 사이클 × 5회 = 25회 flake-free.
+- [x] **M4 끝 도그푸딩 (~1주, ADR-024)** — poly-phony 측 5 사이클 완료. 핵심 약속 9개 중 ✅ 8 + ⚠️ 1, 의제 1·2 노출 확정 + F1 신규 BUG (sys.shutdown hang when watchWith). 후속 fix → M4.1.
+- [x] **M4.1 후속 fix + 재검증** — 4개 finding (F1 + 의제 1 + 의제 2 + F2) 모두 closed, consumer 측 5 사이클 × 5회 = 25회 flake-free.
 
 **완료된 사이클:**
 - 🟢 사이클 1 — Strategy ADT (`Resume` / `Restart` / `Stop`) + `Behaviors.supervise(b).onFailure(matcher, strategy)` fluent 빌더 + `unwrapMeta` 두 종류 래퍼 추출 (ADR-034). 10 테스트
@@ -209,12 +209,12 @@
 - 🟢 사이클 4 — Error matcher 헬퍼 (`matchInstance` / `matchTag` / `matchAll` / `matchPredicate`) + sequential 순회 약정. 4 테스트
 - 🟢 사이클 5 — `examples/05-restart.ts` + 발견 의제 정리. 4 테스트. 누적 154 테스트.
 
-**M4.1 환류 사이클 (도그푸딩 #3 결과 fix):**
+**M4.1 후속 사이클 (도그푸딩 #3 결과 fix):**
 - 🟢 사이클 1 — F1 (sys.shutdown hang when watchWith): self-loop watcher 알림 시 status 체크 추가 (죽어가는 watcher skip). 1112ms timeout → 111ms 정상 종료.
 - 🟢 사이클 2 — 의제 1+2 (자발 stop / supervisor stop 강등 시 PostStop+watcher 통합): `onSelfTermination` 콜백 도입, `stopActor` 의 cleanup 부분을 단일 source of truth 로 통합. ADR-036. 4 테스트 (총 161).
 - 🟢 사이클 3 — poly-phony 측 재검증 (5 사이클 × 5회 = 25회 flake-free, 4개 finding 모두 closed, 회귀 0). M4 _전체_ DoD 🟢.
 
-**M4 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 환류 fix + 재검증 모두 충족. 161 테스트.
+**M4 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 후속 fix + 재검증 모두 충족. 161 테스트.
 
 **M5 로 미룸 (ADR-037 후보):**
 - 의제 3 (PreRestart 재실패) — restart-cleanup 정책 + withLimit 와 묶음
@@ -257,13 +257,13 @@
 - 🟢 사이클 5 — `examples/06-backoff.ts` + `07-stash.ts` + `08-timer.ts` + USAGE.md 갱신 (M5 표면 표 + Errors + 안 되는 것 정리). 모두 `pnpm tsx` 실행 검증. M5 _코드_ DoD 충족.
 - 🟢 미니 사이클 — _Effect 밖 throw_ 안전망 (interpretStep / interpretSignalStep 의 Effect.suspend wrap). ADR-040 후속 resolved. 누적 201 테스트.
 
-**M5.1 환류 사이클 (도그푸딩 #4 결과):**
+**M5.1 후속 사이클 (도그푸딩 #4 결과):**
 - 🟢 사이클 1 (가이드 작성) — `docs/DOGFOODING.md` 박음.
-- 🟢 사이클 2 (도그푸딩 진행) — poly-phony 측 5 사이클 × 3회 모두 통과. _finding 0, 회귀 0, 환류 fix 불요._
+- 🟢 사이클 2 (도그푸딩 진행) — poly-phony 측 5 사이클 × 3회 모두 통과. _finding 0, 회귀 0, 후속 fix 불요._
 
 **M5 _전체_ DoD 확정 (2026-05-09):** 코드 + examples + 도그푸딩 #4 통과 + 안전망 (Effect 밖 throw fix). 201 테스트.
 
-**M∞.1 환류 사이클 (codex review 4 finding + re-review 회귀 2 finding):**
+**M∞.1 후속 사이클 (codex review 4 finding + re-review 회귀 2 finding):**
 - 🟢 사이클 1 (F3+F4 — interpreter cleanup 완전성, ADR-043) — 5회 flake-free, 회귀 5개. 2026-05-09.
 - 🟢 사이클 2 (F1+F2 — spawn/watch race-free, ADR-044) — atomic STM tx 로 race window 제거. `ChildNameTaken` 새 Tagged err. 5회 flake-free, 회귀 4개. 210 테스트. 2026-05-10.
 - 🟢 사이클 3 (codex re-review) — R1 (P1, Terminated semantics 회귀) + R2 (P2, spawn fail 자료 누수) 발견. 사이클 4 결정.

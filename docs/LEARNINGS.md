@@ -254,7 +254,7 @@
   1. spawn happens-before 부재 — STM 과 별개, fiber fork 후 Setup 평가 완료 await 안 함. Deferred latch 로 fix.
   2. Effect 3.21.2 `TMap.remove` 본체 버그 — `Chunk.partition` 술어 자리 잘못, hash 충돌 bucket 전부 비움. 우리 Registry 키들이 같은 bucket 으로 떨어져 cascade silent skip 야기. STM tx 자체는 atomic 했음, 그 _안의_ TMap.remove 가 broken.
   - (1) 만 fix 했으면 cascade 는 여전히 silent skip. consumer 가 라이브러리 내부 안 보니 (1) layer 로 추론한 건 자연스럽고 합리적 — _abstraction leak_ 의 사례. _라이브러리 잣대로 재해석_ 의 ADR-028 정신 그대로 (consumer 추론 채택 X, 우리 측 실측 채택).
-- [tooling] **도그푸딩의 _진짜 가치_** — consumer lifecycle race 시나리오 (spawn → shutdown → cleanup) 가 라이브러리 격리 테스트가 못 잡는 BUG 를 surface. 라이브러리 측 system.test.ts 는 _spawn 후 sleep → shutdown_ 패턴이 default 였고, _즉시 shutdown_ 케이스가 없었음. consumer 가 _당연한 사용 시나리오_ 로 자연 노출 → 라이브러리 측 spawn race fix 사이클로 환류.
+- [tooling] **도그푸딩의 _진짜 가치_** — consumer lifecycle race 시나리오 (spawn → shutdown → cleanup) 가 라이브러리 격리 테스트가 못 잡는 BUG 를 surface. 라이브러리 측 system.test.ts 는 _spawn 후 sleep → shutdown_ 패턴이 default 였고, _즉시 shutdown_ 케이스가 없었음. consumer 가 _당연한 사용 시나리오_ 로 자연 노출 → 라이브러리 측 spawn race fix 사이클로 후속.
 - [process] M3.1 사이클 1 의 입력 → 결과 흐름:
   - 입력: poly-phony 측 100ms grace 우회 보고 (도그푸딩 #2 cycle 5)
   - 진단 (consumer): STM 경계 추측
@@ -278,7 +278,7 @@
 ### 2026-05-09 — M3 완료 명시
 
 - [process] **M3 마일스톤 _전체_ DoD 확정.** 사이클 6 + M3 끝 도그푸딩 #2 (5 사이클) + M3.1 사이클 1 (spawn race fix 두 layer + consumer 측 9ms / 5회 flake-free 재검증) 모두 충족. PLAN.md M3 상태 표기 🟢 완료 / M3.1 도 🟢 완료. 누적 118 테스트.
-- [process] M3 의 _진짜 완료_ 는 코드 작성 끝 (사이클 6) 이 아니라 _도그푸딩 환류 fix 까지 통과한 시점_ — ADR-024 정신 그대로. M2 끝 도그푸딩 #1 도 ADR-028~031 환류로 이어진 동일 패턴.
+- [process] M3 의 _진짜 완료_ 는 코드 작성 끝 (사이클 6) 이 아니라 _도그푸딩 후속 fix 까지 통과한 시점_ — ADR-024 정신 그대로. M2 끝 도그푸딩 #1 도 ADR-028~031 후속로 이어진 동일 패턴.
 - [process] 다음 갈래 후보: (a) M4 진입 (Supervision restart strategy), (b) Effect TMap.remove 본체 버그 upstream 보고 (PR), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ (ADR-028) 정신상 (a) 가 자연스러운 다음 단계.
 
 
@@ -342,8 +342,8 @@
 - [discovery/!] **자발 Stopped 시 watcher 알림 안 감** (사이클 4 발견 재확인) — Akka Typed: 자발 stop 도 termination → watcher 알림 가야. 현재는 외부 stopActor 만 알림 발사. messageLoop 의 자발 Stopped → PostStop emit → fiber 종료 흐름은 watchers 알림 없이 끝남.
 - [discovery] **PreRestart 처리 도중 fail 시 단순 stop 강등** — 사이클 3 결정으로 일단 단순화 (재귀 supervision 없음). M5 withLimit (재시도 한도) 와 함께 본격 처리 예정. 현재 단계는 _안전망_.
 - [process] **세 발견 의제는 같은 패밀리** — _stop/cleanup 흐름의 여러 경로 정합성_. 자발 Stopped / 외부 ctx.stop / supervisor stop 강등 / supervisor restart — 각 경로의 PostStop / watcher / Scope cleanup / fiber 종료 약속이 통일되지 않음. M4 끝 도그푸딩 + ADR-037 (가칭 _stop 경로 통일_) 후보.
-- [process] DoD 부분 체크 — `examples/05` 항목 ✅. _M4 끝 도그푸딩 (~1주, ADR-024)_ 항목은 _사용자 진행 대기_ — M4 _전체_ DoD 확정은 도그푸딩 환류 fix 후 (M3 패턴과 동일).
-- [process] 도그푸딩 진행 방향 결정 — **poly-phony 측에서 직접** (M3 도그푸딩 #2 패턴 동일). 사이클 5 는 examples/05 + 발견 의제 정리로 닫고, 도그푸딩 입력 받으면 M4.도그푸딩 / M4.1 환류 fix 후속 사이클 진행 예정. 사이클 5 발견 3 의제 (supervisor stop PostStop / 자발 Stopped watcher / PreRestart 재실패) 도 poly-phony 사용 중 _실제 노출_ 되는지 확인 후 우선순위 정함.
+- [process] DoD 부분 체크 — `examples/05` 항목 ✅. _M4 끝 도그푸딩 (~1주, ADR-024)_ 항목은 _사용자 진행 대기_ — M4 _전체_ DoD 확정은 도그푸딩 후속 fix 후 (M3 패턴과 동일).
+- [process] 도그푸딩 진행 방향 결정 — **poly-phony 측에서 직접** (M3 도그푸딩 #2 패턴 동일). 사이클 5 는 examples/05 + 발견 의제 정리로 닫고, 도그푸딩 입력 받으면 M4.도그푸딩 / M4.1 후속 fix 후속 사이클 진행 예정. 사이클 5 발견 3 의제 (supervisor stop PostStop / 자발 Stopped watcher / PreRestart 재실패) 도 poly-phony 사용 중 _실제 노출_ 되는지 확인 후 우선순위 정함.
 
 
 
@@ -361,7 +361,7 @@
 - [discovery] **2년 살아남은 이유**: Effect own test (`TMap.test.ts`) 가 짧은 varied 키 (`"a"`, `"b"`) 만 사용 → 다른 bucket 으로 분산 → bucket-wipe 안 일어남. STM 자체가 minor feature 라 community 노출 적음.
 - [process] **upstream issue 박음**: https://github.com/Effect-TS/effect/issues/6225 (제목 _"TMap.remove and removeAll incorrectly clear entire bucket on hash collision"_). 본문: 인사 + 격리 reproducer (custom Hash 강제 충돌, 도메인 중립) + 현재 코드 + 제안 fix patch. ~96 줄, 우리 도메인 흔적 0, attribution 없이 (commit 패턴과 일관).
 - [code] `src/registry.ts` + `src/entry.ts` 의 우회 주석에 issue link + 복원 조건 (_"위 issue fix 가 release 되면 TMap 직접 사용으로 swap 가능"_) 명시. fix release 되면 `TRef<HashMap>` → `TMap` 한 줄 swap 으로 복원.
-- [process] OSS 환류 의의 — ADR-028 의 _라이브러리 정통_ 정신 그대로. 우리 우회는 _임시_, upstream fix 후 정통 복원이 자연스러움. PR 까지는 안 보냈지만 (C 갈래) reproducer + fix patch 까지 포함해 maintainer 부담 최소화.
+- [process] OSS 후속 의의 — ADR-028 의 _라이브러리 정통_ 정신 그대로. 우리 우회는 _임시_, upstream fix 후 정통 복원이 자연스러움. PR 까지는 안 보냈지만 (C 갈래) reproducer + fix patch 까지 포함해 maintainer 부담 최소화.
 
 
 
@@ -528,8 +528,8 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 
 #### M4 완료 명시
 
-- [process] **M4 마일스톤 _전체_ DoD 확정.** 코드 사이클 1~5 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 환류 사이클 1~3 (F1 + 의제 1+2 fix + consumer 측 25회 flake-free 재검증) 모두 충족. PLAN.md M4 상태 표기 🟢 완료. 누적 161 테스트.
-- [process] M4 의 _진짜 완료_ 도 M3 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 환류 fix 까지 통과한 시점_. ADR-024 정신 일관 (M2 끝 #1 → ADR-028~031, M3 끝 #2 → M3.1, M4 끝 #3 → M4.1).
+- [process] **M4 마일스톤 _전체_ DoD 확정.** 코드 사이클 1~5 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 후속 사이클 1~3 (F1 + 의제 1+2 fix + consumer 측 25회 flake-free 재검증) 모두 충족. PLAN.md M4 상태 표기 🟢 완료. 누적 161 테스트.
+- [process] M4 의 _진짜 완료_ 도 M3 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 후속 fix 까지 통과한 시점_. ADR-024 정신 일관 (M2 끝 #1 → ADR-028~031, M3 끝 #2 → M3.1, M4 끝 #3 → M4.1).
 - [insight] **single root cause 가설 검증.** consumer (poly-phony) 측 ADR-037 가설 = "F3 단일 root cause". 라이브러리 측 진단 = "두 layer (의제 1 = 통로 호출 안 됨, 의제 2 = cleanup 자체 부재)". 결론: _semantic 일치_ 측면에서 가설 정확, _근본 메커니즘_ 측면에서는 두 layer. 작은 fix 두 개 (`onSelfTermination` 콜백 + cleanup 단일 source of truth) 로 4개 finding (F1 + F2 + 의제 1 + 의제 2) 모두 closed → consumer 가설의 _semantic 통일_ 직관이 사실상 맞았음. ADR-037 큰 통일은 미루고 작은 fix 로 충분 → _라이브러리 설계 우선_ (ADR-028) 정신 그대로.
 - [process] 다음 갈래 후보: (a) M5 진입 (Backoff / Stash / Timer), (b) Effect TMap 본체 PR (issue #6225 follow-up), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ 정신상 (a) 가 자연스러운 다음.
 
@@ -592,7 +592,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [process] **examples 3개 모두 `pnpm tsx` 실행 검증** — 06-backoff (setup #1~4 + 200/400/800ms 점진 + 한도 초과 stop), 07-stash (happy: 3 stash → unstashAll 순서 보존 / overflow: 3번째 fail → restart → 새 buffer), 08-timer (heartbeat 3회 + cancel + OneShot + scheduleOnce + ctx.fork stop 시 자동 cancel). _문서가 아닌 실측 동작_ 으로 검증.
 - [insight] **examples 작성 = 사용자 표면의 _체험_ — 표면 어색함 1차 발견 기회.** 사이클 4 LEARNINGS 의 _Effect 밖 throw_ cliff 가 examples 06 작성 시 다시 노출되지 않게 _Effect.sync 안에서 throw_ 패턴을 _examples 의 공식 패턴_ 으로 굳힘 (05-restart 와 일관). 사용자가 examples 모방하면 cliff 안 부딪힘.
 - [process] USAGE.md 갱신 — _Behaviors 빌더 카탈로그_ + _ActorContext 표면_ + _Tagged Errors_ + _안 되는 것_ 표 모두 M5 표면 (withTimers / withStash / restartWithBackoff / withLimit / ctx.fork / scheduleOnce + RestartLimitExceeded / StashOverflow) 추가. _안 되는 것_ 표는 _진짜 미구현_ (ref.ask, withResetBackoffAfter, matchSchema, unstash 부분, startTimerAtFixedRate) 만 남김. M5 코드 끝 시점의 _현재 표면_ 한 표로 정리.
-- [process] M5 사이클 5 = 코드 _DoD 끝_, 본격 도그푸딩 (M5.1) 만 남음. M3.1, M4.1 패턴 그대로 — 환류 사이클 입력 후 _M5 전체 DoD 🟢_.
+- [process] M5 사이클 5 = 코드 _DoD 끝_, 본격 도그푸딩 (M5.1) 만 남음. M3.1, M4.1 패턴 그대로 — 후속 사이클 입력 후 _M5 전체 DoD 🟢_.
 - [process] 다음 갈래: (a) M5.1 본격 도그푸딩 _즉시_ — poly-phony 측 전면 사용 가이드, (b) _Effect 밖 throw_ 의 makeReceive fix 미니 사이클 (사이클 5 LEARNINGS 의 후속 후보) 먼저 박고 도그푸딩 입력, (c) Effect TMap upstream PR (#6225 follow-up). _라이브러리 설계 우선_ 정신상 (b) → (a) 순서 자연스러움.
 
 
@@ -613,7 +613,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [design] **5 사이클 분할 — 사이클 #2 / #3 패턴 그대로.** (1) supervise + matcher chain (M4 + M5 backoff/withLimit), (2) withTimers + ctx.fork, (3) withStash 초기화, (4) watchWith + ask + scheduleOnce, (5) 종합 + stress. 각 사이클 _구체 도메인 시나리오_ — agent 의 _실제 사용_ 패턴이라 합성 표면 노출.
 - [process] **_이미 fix 된 cliff_ 표 박음.** #2/#3 의 finding 들 (spawn race / 의제 1+2 / F1 / Effect 밖 throw) 모두 _이미 fix_ — #4 에서 _재발견되면 회귀_. 회귀 안전 검증 자동.
 - [process] AGENTS.md + CLAUDE.md 색인 갱신 — 새 가이드 진입점 등록.
-- [process] PLAN.md M5.1 환류 사이클 박음 — _가이드 작성_ 사이클 1, 사이클 2+ 는 finding 도착 시 환류 fix.
+- [process] PLAN.md M5.1 후속 사이클 박음 — _가이드 작성_ 사이클 1, 사이클 2+ 는 finding 도착 시 후속 fix.
 
 
 
@@ -640,7 +640,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 
 - [process] **M5 마일스톤 _전체_ DoD 확정.** 코드 사이클 1~5 + 미니 사이클 (Effect 밖 throw 안전망) + M5.1 사이클 1 (가이드 작성) + 사이클 2 (도그푸딩 #4 통과) 모두 충족. PLAN.md M5 상태 표기 🟢 완료. 누적 201 테스트.
 - [process] M5 의 _진짜 완료_ 도 M3 / M4 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 통과 시점_. ADR-024 정신 일관 (#1 → ADR-028~031, #2 → M3.1, #3 → M4.1, **#4 → fix 불요**).
-- [insight] **본격 도그푸딩이 _finding 0_ 으로 통과한 의미.** #1~#3 환류 사이클이 _이미_ 본 표면을 다 다듬어 놓음 + 미니 사이클이 _Effect 밖 throw_ cliff 사전 fix → #4 의 _finding 0_ 은 _저절로_ 가 아닌 _누적된 환류_ 의 결과. _도그푸딩 입력은 철학 안에서 수용_ (ADR-028) + _라이브러리 설계 우선_ + _도그푸딩 입력 직전 표면 다듬기_ 패턴이 _배포 직전_ 까지 통과한 셈.
+- [insight] **본격 도그푸딩이 _finding 0_ 으로 통과한 의미.** #1~#3 후속 사이클이 _이미_ 본 표면을 다 다듬어 놓음 + 미니 사이클이 _Effect 밖 throw_ cliff 사전 fix → #4 의 _finding 0_ 은 _저절로_ 가 아닌 _누적된 후속_ 의 결과. _도그푸딩 입력은 철학 안에서 수용_ (ADR-028) + _라이브러리 설계 우선_ + _도그푸딩 입력 직전 표면 다듬기_ 패턴이 _배포 직전_ 까지 통과한 셈.
 - [insight] **consumer 추가 관찰의 _긍정적 신호_.** (1) domain 어휘 자연 — RateLimitError/BackendError/StashOverflow/AskTimeout 모두 Tagged 라 matchTag 하나로 충분. (2) ctx.ask + Effect.catchTag + scheduleOnce 합성이 Akka Typed retry 정통과 일치. (3) typecheck 깨끗, install 마찰 없음. _wrapper 부담 5~10줄_ 가이드 약속 (ADR-028 의 _3차 잣대_) 유지.
 - [process] 다음 갈래: **M∞ 진입** (npm 배포 직전 결정거리). 후보:
   - (a) semver 정책 결정 (ADR — 0.x = minor breaking, 1.0+ = SemVer 후보)
@@ -756,7 +756,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 ### 2026-05-10 — M∞.1 사이클 5: codex re-re-review GATE: PASS + 0.1.0 publish
 
 - [verify] codex re-re-review (`codex review --commit dbae832`): _"I did not find any blocking correctness issues in this commit. The status split, atomic termination cleanup, and spawn failure cleanup all look internally consistent with the surrounding lifecycle logic."_ — 사이클 4 fix 가 깨끗.
-- [milestone] **`@loveqoo/effect-actor@0.1.0` npm publish (2026-05-10).** First public release. M0-M5 + M∞.1 환류 (ADR-043/044/045) 통합. 215 테스트, 5회 flake-free, codex 3 라운드 GATE PASS.
+- [milestone] **`@loveqoo/effect-actor@0.1.0` npm publish (2026-05-10).** First public release. M0-M5 + M∞.1 후속 (ADR-043/044/045) 통합. 215 테스트, 5회 flake-free, codex 3 라운드 GATE PASS.
 - [milestone] git tag `v0.1.0` + 32 커밋 origin push — GitHub repo `loveqoo/effect-actor` 도 첫 push (initial commit 1 → 33 커밋).
 - [process] **npm 2FA = WebAuthn/passkey (TOTP 옵션 제한).** macOS Touch ID 가 platform authenticator 로 동작 — 물리 키 없이 진행 가능. 등록 시 _이름표_ 만 입력 ("MacBook Pro" 등) → 기기 자체가 인증.
 - [insight] **3 라운드 review 패턴의 가치.** 1라운드 (사이클 f, codex 4 finding) → 2라운드 (사이클 3, R1+R2 회귀 발견) → 3라운드 (사이클 5, GATE PASS). _fix 가 새 finding 만든다_ 가설 검증 — 회귀 fix 후 _다시_ review 가 정통. 배포 전 _수렴_ 까지가 외부 검증의 진짜 사이클.
@@ -772,4 +772,4 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [observation] **`--legacy-peer-deps` 필요했음** — npm 의 strict peer dep 처리. pnpm 은 일반적으로 자동 처리. 0.1.1 docs patch 후보 (README 에 npm 시 안내).
 - [insight] **packaging DoD = _진짜 published tarball + 진짜 IDE_.** source-direct 도그푸딩 (#4) 은 _기능_ 검증 — exports / .d.ts / IDE 는 검증 안 됨. #5 가 그 layer 메움. 향후 라이브러리 첫 배포마다 _이 사이클 _ 필수.
 - [insight] **ADR-045 의 _배포 환경_ 검증.** 사이클 4 의 fix (Terminated semantics 보존) 가 _내부 테스트_ 가 아닌 _진짜 dist/ + npm install + 다른 워크스페이스_ 에서도 정확 동작. 사이클 4 의 회귀 테스트 5개 가 _사용자 측 환경_ 에서도 같은 보장 — TDD + packaging dogfood 이 _모든 layer 검증_.
-- [milestone] **M∞ _전체_ DoD 🟢 (2026-05-10)**. (a)~(g) + M∞.1 환류 5 사이클 + 도그푸딩 #5. 남은 (d) TMap upstream PR 은 _별도 의제_ — 우리 측 우회 (ADR-031 보강) 가 0.1.0 에서 정상 동작 확인됨.
+- [milestone] **M∞ _전체_ DoD 🟢 (2026-05-10)**. (a)~(g) + M∞.1 후속 5 사이클 + 도그푸딩 #5. 남은 (d) TMap upstream PR 은 _별도 의제_ — 우리 측 우회 (ADR-031 보강) 가 0.1.0 에서 정상 동작 확인됨.
