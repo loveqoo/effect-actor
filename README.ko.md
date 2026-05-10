@@ -9,7 +9,7 @@
 | 버전 | [`0.1.0`](https://www.npmjs.com/package/@loveqoo/effect-actor) — 첫 공개 배포 (2026-05-10) |
 | 마일스톤 | **M0~M5 + M∞ + M∞.1 모두 🟢** — 도그푸딩 5라운드 + codex 3라운드 GATE PASS |
 | npm 패키지 | `@loveqoo/effect-actor` — `pnpm add @loveqoo/effect-actor effect` |
-| 테스트 | 215 자체 테스트, 5회 flake-free. consumer (poly-phony) 측 도그푸딩 #4 (5×3=15회 flake-free) + #5 (npm-install packaging 통과) |
+| 테스트 | 215 자체 테스트, 5회 flake-free. consumer 측 도그푸딩 #4 (5×3=15회 flake-free, in-tree) + #5 (npm-install packaging 통과) |
 | 코드 | M5 표면 + M∞.1 환류 (ADR-043/044/045 — interpreter cleanup 단일 source, spawn/watch race-free atomic STM, Terminated semantics + spawn-fail cleanup). examples/01~09 실행 가능. |
 
 ## 무엇인가
@@ -24,12 +24,12 @@ EffectTS 위에 [Akka Typed](https://doc.akka.io/docs/akka/current/typed/index.h
 - _부모-자식 supervision tree_ — framework 차원에서 인코딩
 - _Behavior 작성자가 직접 supervision 정책 부착_ — Akka Typed 철학
 
-기존 `poly-phony` 작업에서 위 모델 없이 Actor를 만들어보고 한계를 확인 → 새 레포로 분리. 자세한 격차 분석은 [docs/AKKA_REFERENCE.md § Polyphony와의 비교](./docs/AKKA_REFERENCE.md#10-polyphony와의-비교).
+기존 내부 실험에서 위 모델 없이 Actor를 만들어보고 한계를 확인 → 새 레포로 분리. Akka Typed 표면 vs. _Effect 만으로 단순 구현_ 의 격차 분석은 [docs/AKKA_REFERENCE.md](./docs/AKKA_REFERENCE.md).
 
 ## 매직 모먼트
 
 ```
-// before (poly-phony 스타일):
+// before (Effect 만으로 단순 구현):
 //   액터 재시작 시 새 ref 발급 → 외부 코드가 stale ref 들고 있음
 //   mailbox 재생성 → 큐 안 메시지 소실
 

@@ -10,7 +10,7 @@
 |---|---|
 | Version | [`0.1.0`](https://www.npmjs.com/package/@loveqoo/effect-actor) — first public release (2026-05-10) |
 | Milestones | M0~M5 + M∞ (publish) + M∞.1 (review-feedback hardening, ADR-043/044/045) all 🟢 |
-| Tests | 215 passing, 5× flake-free. Consumer (poly-phony): dogfooding #4 (15 runs flake-free) + #5 (npm-install packaging passed) |
+| Tests | 215 passing, 5× flake-free. Consumer-side dogfooding: #4 (15 runs flake-free, in-tree) + #5 (npm-install packaging passed) |
 | External review | `codex review` — 3 rounds, final GATE: PASS |
 | Surface | `spawn` / `tell` / `receive` / `setup` / `watch` / `watchWith` / `unwatch` / `watchTerminated` / `ask` / `supervise` / `restart` / `restartWithBackoff` / `withLimit` / `withTimers` / `withStash` / `ctx.fork` / `ctx.scheduleOnce` |
 
@@ -26,7 +26,7 @@ When that one line holds, the rest follows:
 - _parent-child supervision tree_ encoded by the framework, not by user code
 - _supervision policy attached by the behavior author_ — Akka Typed philosophy
 
-This project came out of an earlier attempt ([poly-phony](../poly-phony)) where the above guarantees were absent. The gap analysis is in [docs/AKKA_REFERENCE.md § 10](./docs/AKKA_REFERENCE.md#10-polyphony와의-비교).
+This project came out of an earlier internal attempt where the above guarantees were absent. The full gap analysis (Akka Typed surface vs. naive Effect-on-its-own) is in [docs/AKKA_REFERENCE.md](./docs/AKKA_REFERENCE.md).
 
 ## Install
 
@@ -76,7 +76,7 @@ More patterns in [examples/](./examples) (01-counter through 09-tagged-enum). Pl
 ## Magic moment
 
 ```ts
-// before (poly-phony style):
+// before (typical naive Effect-actor implementation):
 //   ref reissued on restart → external code holds stale ref
 //   mailbox recreated → in-flight messages lost
 
