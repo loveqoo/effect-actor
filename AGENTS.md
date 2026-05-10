@@ -10,8 +10,8 @@
 **`effect-actor`** — EffectTS 기반 Akka Typed 스타일 Actor 라이브러리.
 오픈소스로 npm 배포 예정. 현재는 _구현 전 단계_ (M0: 정보 모으기).
 
-도그푸딩 환경: [`/Users/anthony/Repository/github/loveqoo/poly-phony`](../poly-phony) (별도 레포).
-이전 시도(poly-phony) 에서 만난 한계가 이번 레포의 출발점. [DECISIONS.md](./docs/DECISIONS.md) 의 ADR-002 참고.
+도그푸딩 환경: 사용자 측 별도 consumer 레포 (이 레포 외부, 사용자 로컬).
+이전 내부 실험에서 만난 한계가 이번 레포의 출발점. [DECISIONS.md](./docs/DECISIONS.md) 의 ADR-002 참고.
 
 ---
 
@@ -26,7 +26,7 @@
 | [docs/API.md](./docs/API.md) | 사용자 API 시안 + 풍부한 예시. _시그니처가 어색하면 곧장 고침_ |
 | [docs/DECISIONS.md](./docs/DECISIONS.md) | ADR. _왜 X 대신 Y 인가_. 결정 뒤집기 전 반드시 확인 |
 | [docs/LEARNINGS.md](./docs/LEARNINGS.md) | 작업 중 알게 된 사실 누적. _같은 학습 두 번 하지 말 것_ |
-| [docs/DOGFOODING.md](./docs/DOGFOODING.md) | 도그푸딩 이력 + 본격 도그푸딩 가이드 (poly-phony 측 사용자 측 검증) |
+| [docs/DOGFOODING.md](./docs/DOGFOODING.md) | 도그푸딩 이력 + 본격 도그푸딩 가이드 (consumer 측 사용자 검증) |
 
 ---
 

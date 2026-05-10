@@ -16,7 +16,7 @@
 **도그푸딩 단계 — source-direct (ADR-032):**
 
 ```bash
-# 소비 레포 (예: poly-phony) 에서:
+# 소비 레포 (consumer workspace) 에서:
 pnpm add file:../effect-actor
 # 또는 pnpm workspace link (monorepo)
 ```

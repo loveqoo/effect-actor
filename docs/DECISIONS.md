@@ -46,7 +46,7 @@ Akka는 Classic과 Typed 두 갈래가 있다. Classic은 부모가 자식의 su
 - 일자: 2026-05-08
 
 ### 맥락
-poly-phony에서 ActorRef가 closure-bound value였고 mailbox가 인스턴스에 종속이었다. 그래서 restart가 의미 있게 동작 못함. 새 레포에서 이 모델을 _점진적_ 으로 도입할지, _1일차_ 부터 도입할지가 갈림길이었다.
+consumer에서 ActorRef가 closure-bound value였고 mailbox가 인스턴스에 종속이었다. 그래서 restart가 의미 있게 동작 못함. 새 레포에서 이 모델을 _점진적_ 으로 도입할지, _1일차_ 부터 도입할지가 갈림길이었다.
 
 ### 결정
 **1일차부터 Stable ActorRef + Mailbox(인스턴스 분리) 모델로 시작.**
@@ -67,7 +67,7 @@ poly-phony에서 ActorRef가 closure-bound value였고 mailbox가 인스턴스�
 오픈소스로 npm에 배포할 계획이지만, _초기에_ 배포하면 semver 부담이 생기고 공개 API의 자유도가 떨어진다.
 
 ### 결정
-**모든 마일스톤(M1–M5)이 완성되고 poly-phony에서 충분히 도그푸딩한 _뒤에_ 배포한다.**
+**모든 마일스톤(M1–M5)이 완성되고 consumer에서 충분히 도그푸딩한 _뒤에_ 배포한다.**
 
 ### 결과
 - (+) 인프라 작업 자유도 최대. 마음껏 시그니처 바꿀 수 있음.
@@ -519,7 +519,7 @@ Round 2 (Codex): 이름만 변경하는 건 미봉. 부분 프로토콜 노출�
 ADR-004 (한 번에 도그푸딩 — M5+M∞ 끝) 이 Codex round 1 우려. ADR-014 (D10) 에서 _M3 끝 가벼운 + M5 끝 본격_ 으로 재고. 하지만 round 2 Codex: M3 까지 기다리는 게 _여전히 늦음_. 가장 위험한 건 watch/restart 보다 _M1~M2 의 토대_ (incarnation/cell ref/Scope) 가 코드에서 진짜 동작하는지.
 
 ### 결정
-**M2 끝 도그푸딩 시작.** ~1주, poly-phony 에서 _setup + PostStop + 상태 갖는 actor_ 한 개 만들어보기. M1~M2 토대 검증.
+**M2 끝 도그푸딩 시작.** ~1주, consumer 에서 _setup + PostStop + 상태 갖는 actor_ 한 개 만들어보기. M1~M2 토대 검증.
 
 **M3 끝, M4 끝 추가 도그푸딩** (마일스톤마다 ~1주). M5 끝 _본격_ 도그푸딩.
 
@@ -625,7 +625,7 @@ M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경
 ## ADR-028: 라이브러리 설계 우선순위 잣대
 - 상태: accepted
 - 일자: 2026-05-09
-- 출처: M2 끝 도그푸딩 #1 (poly-phony) 보류 입력 → 잣대 명시 필요
+- 출처: M2 끝 도그푸딩 #1 (consumer) 보류 입력 → 잣대 명시 필요
 
 ### 맥락
 도그푸딩 #1 입력으로 _4 결정 묶음_ (ask 시그너처, typed reply err, watch+ask 통합, ctx.stop cascade) 이 들어옴. 도그푸딩 입력 _그대로 채택_ 하면 라이브러리 설계 흔들림 — _첫 사용자_ 한 명에 맞춘 표면이 _다른 사용자_ 에게 어색. ADR-024 의 도그푸딩 정신은 _토대 검증_ 이지 _요구 그대로 채택_ 이 아님. 잣대가 명시 안 되면 매 결정마다 _재발견_.
@@ -644,7 +644,7 @@ M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경
 
 ### 결과
 - (+) 모든 결정의 _재발견_ 비용 0 — 잣대 한 번 정해두면 다음 결정마다 _그 잣대 적용_.
-- (+) _첫 사용자 의존성_ 차단 — poly-phony 한 도메인이 라이브러리 표면 흔들 수 없음.
+- (+) _첫 사용자 의존성_ 차단 — consumer 한 도메인이 라이브러리 표면 흔들 수 없음.
 - (+) Akka Typed 사용자가 _구조적 친숙_ — 학습 비용 최소.
 - (-) 도그푸딩 측 boilerplate 부담 약간 — wrapper 5-10 줄. 라이브러리 설계 일관성과 trade-off 에서 후자 우선.
 - (-) _Akka 정통이 EffectTS 정신과 충돌_ 하는 케이스 발견 시 _Akka 우선_ 이 EffectTS 사용자에게 어색할 수도 — 그때마다 케이스별 ADR 로 명시.
@@ -657,7 +657,7 @@ M1 시작 전에 패키지 매니저 / 빌드 도구 / 테스트 / 실행 환경
 - 출처: M2 끝 도그푸딩 #1 입력 #1 + #2 → ADR-028 잣대 적용
 
 ### 맥락
-도그푸딩 #1 입력 #2: poly-phony 의 ask 가 `ask<In, Out, Err>` (typed err) — `BackendNotFound` 같은 도메인 에러를 typed 로 표현. effect-actor M3 ask 설계 시 typed err 포함 여부 결정 필요.
+도그푸딩 #1 입력 #2: consumer 의 ask 가 `ask<In, Out, Err>` (typed err) — `BackendNotFound` 같은 도메인 에러를 typed 로 표현. effect-actor M3 ask 설계 시 typed err 포함 여부 결정 필요.
 
 ADR-028 잣대 적용:
 - Akka Typed 의 ask 는 _untyped_ — `AskTimeoutException` 만. reply 의 _도메인 에러_ 는 reply ADT 안에 표현 (예: `Result<Resp, Err>` 또는 `Success | Failure` ADT).
@@ -699,7 +699,7 @@ const lookupBackend = (id: string) =>
 - (+) Akka Typed 사용자가 _구조적 친숙_ — `ref.ask(make, timeout)` 정통.
 - (+) 라이브러리 표면 _작음_ — generic 1개, fail 채널 1개.
 - (+) 사용자가 _자기 도메인 에러_ 자유 표현 — reply ADT 가 도메인 분기 자연 노출.
-- (-) poly-phony 같은 도메인이 _wrapper 5-10 줄_ 부담. ADR-028 3차 잣대 (사용자 측 wrapper) 정신.
+- (-) consumer 같은 도메인이 _wrapper 5-10 줄_ 부담. ADR-028 3차 잣대 (사용자 측 wrapper) 정신.
 - (-) `ctx.ask` 와 `ref.ask` 두 표면 — Akka Typed 도 같음 (`AskPattern._` import 또는 ctx 안). 같은 의미, 위치 차이.
 
 ---
@@ -710,7 +710,7 @@ const lookupBackend = (id: string) =>
 - 출처: M2 끝 도그푸딩 #1 입력 #3 → ADR-028 잣대 적용
 
 ### 맥락
-도그푸딩 #1 입력 #3: poly-phony 의 ask 가 `raceFirst(reply, terminated → fail ActorClosed)` — target 이 응답 전에 죽으면 caller 자동 fail. effect-actor M3 ask 에 watch 통합 여부 결정 필요.
+도그푸딩 #1 입력 #3: consumer 의 ask 가 `raceFirst(reply, terminated → fail ActorClosed)` — target 이 응답 전에 죽으면 caller 자동 fail. effect-actor M3 ask 에 watch 통합 여부 결정 필요.
 
 ADR-028 잣대 적용:
 - Akka Typed 의 ask 는 watch _분리_ — ask = timeout 만, watch 는 별도 (`ctx.watch` 또는 `ctx.watchWith`). caller 가 _명시_ 로 watch + ask combine.
@@ -738,7 +738,7 @@ const askOrFailIfClosed = <Resp>(
 - (+) Akka Typed 정통 — ask 와 watch 가 _독립 직교 기능_, 사용자가 필요 시 combine.
 - (+) ask 표면 _단순_ — fail 채널 1개 (`AskTimeout`).
 - (+) `ctx.watchTerminated` 가 watch 의 _Effect 형태_ 노출 — race / scope-bound 합성 자유.
-- (-) poly-phony 의 _자동 watch_ 의미가 wrapper 로 이동 — 5줄. ADR-028 3차 잣대 정신.
+- (-) consumer 의 _자동 watch_ 의미가 wrapper 로 이동 — 5줄. ADR-028 3차 잣대 정신.
 - (-) caller 가 _명시 combine 잊기_ 가능성 — Akka Typed 도 같은 부담 (사용자 책임).
 
 ---
@@ -800,10 +800,10 @@ ADR-028 잣대 적용:
 - 상태: superseded by ADR-042 (2026-05-09, M∞ 사이클 c — 도그푸딩 단계 끝, 배포용 tsc 빌드)
 - 일자: 2026-05-09
 - 출처: M2 끝 도그푸딩 #1 입력 #5 → 도그푸딩 진입 자체를 막던 갭 해소
-- 검증: 2026-05-09 도그푸딩 #2 사이클 0 — poly-phony vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader / build step 없이 30줄 probe 통과 (LEARNINGS).
+- 검증: 2026-05-09 도그푸딩 #2 사이클 0 — consumer vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader / build step 없이 30줄 probe 통과 (LEARNINGS).
 
 ### 맥락
-도그푸딩 #1 보류 사유 #5: `package.json` 의 `private: true` + `exports` 미설정 → poly-phony 가 file: dep 으로 path 해석 불가. 도그푸딩 진입 자체가 막힘.
+도그푸딩 #1 보류 사유 #5: `package.json` 의 `private: true` + `exports` 미설정 → consumer 가 file: dep 으로 path 해석 불가. 도그푸딩 진입 자체가 막힘.
 
 세 노선 (도그푸딩 #1 입력에서 정리):
 - (a) `private` 해제 + `exports: { ".": "./src/index.ts" }` — 소비측 tsx/ESM TS loader 가 source 직접 import
@@ -821,13 +821,13 @@ ADR-027 의 정신: _빌드 도구는 M∞ 직전_. 즉 dist 빌드는 _M∞ 결
 - `"files": ["src", "README.md", "LICENSE"]` — pnpm pack 시 포함
 - `"publishConfig": { "access": "restricted" }` — _실수로 publish_ 차단 (M∞ 까지 publish X)
 
-소비측 (poly-phony 등) 요구 사항:
+소비측 (consumer 등) 요구 사항:
 - ESM TS loader (tsx, ts-node ESM 모드, vite, 또는 framework 의 dev server)
 - 또는 자기 빌드 단계에서 `@loveqoo/effect-actor` source 를 같이 transform
 
 도그푸딩 시 import 패턴:
 ```bash
-# poly-phony 측에서
+# consumer 측에서
 pnpm add file:../effect-actor
 # 또는 pnpm workspace link (monorepo 인 경우)
 ```
@@ -848,8 +848,8 @@ pnpm add file:../effect-actor
 ## ADR-033: effect 의존성 — peerDependencies + devDependencies 분리
 - 상태: accepted (도그푸딩 #2 사이클 0 검증 완료)
 - 일자: 2026-05-09
-- 출처: 도그푸딩 #2 진입 직전 — 사용자가 effect 버전 차이 (effect-actor ^3.10.0 vs poly-phony ^3.21.2) 지적
-- 검증: 2026-05-09 도그푸딩 #2 사이클 0 — poly-phony 측 effect@3.21.2 가 root node_modules 에 hoist, effect-actor symlink 가 그것을 가리킴. 단일 인스턴스 보장 (LEARNINGS).
+- 출처: 도그푸딩 #2 진입 직전 — 사용자가 effect 버전 차이 (effect-actor ^3.10.0 vs consumer ^3.21.2) 지적
+- 검증: 2026-05-09 도그푸딩 #2 사이클 0 — consumer 측 effect@3.21.2 가 root node_modules 에 hoist, effect-actor symlink 가 그것을 가리킴. 단일 인스턴스 보장 (LEARNINGS).
 
 ### 맥락
 ADR-027 시점에 `effect` 를 `dependencies` 로 두고 ^3.10.0 으로 박았음. 이후 갱신 안 함. 도그푸딩 #2 진입 시 두 가지 문제:
@@ -1444,7 +1444,7 @@ M5 _전체_ DoD 🟢 (도그푸딩 #4 통과). 이제 0.1.0 첫 npm 배포 직�
 **B. 1.0 진입 조건 — _배포 환경 안정 + 외부 issue 라운드_ 후.**
 
 명시적 체크리스트:
-1. npm 배포 후 _최소 1주_ 안정 (poly-phony 외 _다른 사용자 1명_ 이상 사용)
+1. npm 배포 후 _최소 1주_ 안정 (consumer 외 _다른 사용자 1명_ 이상 사용)
 2. 첫 외부 issue 1 라운드 처리 (받음 → 분석 → fix 또는 _안 한다_ 결정)
 3. ADR-006 의 _0.x 비목표_ (Cluster, Persistence 등) 모두 _명시 결정_ — 1.0 에서도 안 하기로 한다 / 1.x 후속 한다 / X
 4. 영어 README + CHANGELOG + CONTRIBUTING 모두 _배포 후 갱신_ 된 상태

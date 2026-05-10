@@ -1,4 +1,4 @@
-# DOGFOODING — poly-phony 측 사용 가이드
+# DOGFOODING — consumer 측 사용 가이드
 
 > _ADR-024 의 도그푸딩 정신 그대로_. effect-actor 의 _사용자 측 검증_ 입력 누적.
 > 문서/코드 정합성을 _쓴 코드_ 가 박는다.
@@ -15,7 +15,7 @@
 | #4 | **M5 끝** | 2026-05-09 | **통과** — 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. 5 cliff 모두 안정. M5 _전체_ DoD 🟢. M∞ 진입 가능. |
 | #5 | **0.1.0 배포 직후** | 2026-05-10 | **통과** — 2 사이클, finding 0, 회귀 0, 3회 flake-free. `npm install` (legacy-peer-deps) → import / tsc strict / 실행 모두 OK. `.d.ts.map` 포함 IDE 친화. 도메인 사이클 (ADR-045 watchTerminated + 재spawn) 정확. **0.1.0 packaging DoD 🟢.** |
 
-#1~#3 은 _가벼운 도그푸딩_ (~1주 한정). **#4 부터 _본격_** — poly-phony 가 effect-actor 위에 _진짜 agent_ 를 만들면서 _모든 표면_ (M1~M5) 사용. 후속 사이클 (M5.1+) 가능성 열어둠.
+#1~#3 은 _가벼운 도그푸딩_ (~1주 한정). **#4 부터 _본격_** — consumer 가 effect-actor 위에 _진짜 agent_ 를 만들면서 _모든 표면_ (M1~M5) 사용. 후속 사이클 (M5.1+) 가능성 열어둠.
 
 **#5 는 _packaging 검증_ 중심** — 기능은 #4 가 검증. #5 의 초점은 _배포한 코드_ 가 _진짜 npm 환경_ 에서 동작하는지. 가벼움 (1-2 사이클).
 
@@ -43,8 +43,8 @@
 ### 1. 환경 준비
 
 ```bash
-# poly-phony 측에서 effect-actor 의존
-cd ~/Repository/github/loveqoo/poly-phony
+# consumer 측에서 effect-actor 의존
+cd <your-consumer-workspace>
 pnpm install
 # effect-actor 는 source-direct export (ADR-032) — 빌드 불요. peer dep 으로 effect 같이.
 ```
@@ -257,21 +257,21 @@ ADR-024 의 _M5 끝_ 본격 도그푸딩 시점 = npm 배포 직전 마지막 �
 
 ### 0. 목적
 
-도그푸딩 #4 까지는 _source-direct_ (poly-phony 가 effect-actor 의 src/ 를 직접 import). #5 는 **`npm install @loveqoo/effect-actor@0.1.0` → `dist/` 번들 사용**. 검증 초점:
+도그푸딩 #4 까지는 _source-direct_ (consumer 가 effect-actor 의 src/ 를 직접 import). #5 는 **`npm install @loveqoo/effect-actor@0.1.0` → `dist/` 번들 사용**. 검증 초점:
 
 1. **설치 path** — `pnpm add @loveqoo/effect-actor` 정상.
 2. **exports 해상도** — `import { ActorSystem, Behaviors, Strategies, ... }` 모두 풀림.
 3. **타입** — IDE 에서 `ActorRef<Msg>`, `Behaviors.receive`, `Strategies.matchTag` 등 자동완성 + 시그너처 hover.
 4. **`.d.ts.map` 의 `go to definition`** — 우리 `src/` (또는 `dist/*.d.ts`) 까지 추적.
-5. **ESM 호환성** — poly-phony 의 module 환경 (`tsconfig.json` 의 `module: NodeNext` 등) 과 충돌 없는지.
-6. **peer dep `effect@^3.10.0`** — poly-phony 의 effect 버전과 충돌 없는지.
+5. **ESM 호환성** — consumer 의 module 환경 (`tsconfig.json` 의 `module: NodeNext` 등) 과 충돌 없는지.
+6. **peer dep `effect@^3.10.0`** — consumer 의 effect 버전과 충돌 없는지.
 
 기능 검증 _아님_ — 기능은 도그푸딩 #4 통과. _포장지 검증_.
 
 ### 1. 환경 준비
 
 ```bash
-cd ~/Repository/github/loveqoo/poly-phony
+cd <your-consumer-workspace>
 
 # (a) 기존 source-direct dependency 제거 (가능한 경우 — 도그푸딩 #4 셋업)
 # package.json 의 "@loveqoo/effect-actor": "file:../effect-actor" 또는 비슷한 항목 제거.
@@ -290,7 +290,7 @@ cat node_modules/@loveqoo/effect-actor/package.json | head -20
 
 #### 사이클 1: smoke install + 한 example 동작
 
-도그푸딩 #4 의 _가장 간단한 표면_ 한 줄 (예: `examples/01-counter.ts` 의 spawn/tell/receive) 을 poly-phony 안 _아무 파일_ 로 옮겨 실행.
+도그푸딩 #4 의 _가장 간단한 표면_ 한 줄 (예: `examples/01-counter.ts` 의 spawn/tell/receive) 을 consumer 안 _아무 파일_ 로 옮겨 실행.
 
 검증 항목:
 - `import { ActorSystem, Behaviors } from "@loveqoo/effect-actor"` 풀림

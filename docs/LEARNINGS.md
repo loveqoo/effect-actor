@@ -128,12 +128,12 @@
 
 - [api] examples/02 가 _setup + PostStop_ 두 핵심을 한 화면. `counter(n)` 의 onSignal 이 closure 의 `n` 잡음 — 마지막 active counter 의 n (=2) 이 PostStop 으로 전달. _Behavior 매개변수_ 패턴이 _상태 + cleanup_ 자연 표현.
 - [process] M2 4 사이클 회고 — 사이클 1 (ADT/빌더 6테) → 2 (interpreter 폴링 8테) → 3 (PostStop 흐름 8테) → 4 (examples + DoD). 누적 99 테스트 (+22). _사이클 2 의 race 비결정성_ 과 _사이클 3 의 의미 변경 회귀_ 가 두 번의 _Akka 의미 결정_ 지점. TDD 가 의미 결정의 _코드화 도구_.
-- [process] 코드 작업 끝 + _사용자 측 도그푸딩_ 단계 — poly-phony 에서 한 agent 만들어보면서 발견된 issue 가 후속 사이클 입력. _문서/코드 모두_ 정합성 유지를 도그푸딩 단계에서 부딪힘 (ADR-024).
+- [process] 코드 작업 끝 + _사용자 측 도그푸딩_ 단계 — consumer 에서 한 agent 만들어보면서 발견된 issue 가 후속 사이클 입력. _문서/코드 모두_ 정합성 유지를 도그푸딩 단계에서 부딪힘 (ADR-024).
 
-### 2026-05-09 — M2 끝 도그푸딩 #1 (poly-phony 보류 입력) → ADR-028~031
+### 2026-05-09 — M2 끝 도그푸딩 #1 (consumer 보류 입력) → ADR-028~031
 
 - [process] 도그푸딩 #1 의 _진짜 가치_ 가 _코드 작성 안 하고 4 결정 입력_ 만 들고 돌아온 것. ADR-024 의 _토대 검증_ 정신 그대로. _첫 사용자 한 명_ 이 라이브러리 표면을 흔들지 않도록 _ADR-028 잣대_ (1차 Akka 정통 / 2차 EffectTS typed / 3차 도그푸딩 boilerplate 사용자 측) 박힘 — 다음 결정의 재발견 비용 0.
-- [api] poly-phony 의 _4 결정_ 중 라이브러리 표면 수용 = #1 ask 자체, #4 ctx.stop cascade graceful. 거절 = #2 typed reply err (Akka untyped), #3 watch+ask 통합 (Akka 분리), #6 Stream pass-through (Akka 별도 패턴). _거절_ 들은 사용자 측 wrapper 5-10 줄로 자연 표현 — ADR-028 의 3차 잣대.
+- [api] consumer 의 _4 결정_ 중 라이브러리 표면 수용 = #1 ask 자체, #4 ctx.stop cascade graceful. 거절 = #2 typed reply err (Akka untyped), #3 watch+ask 통합 (Akka 분리), #6 Stream pass-through (Akka 별도 패턴). _거절_ 들은 사용자 측 wrapper 5-10 줄로 자연 표현 — ADR-028 의 3차 잣대.
 
 ### 2026-05-09 — M3 사이클 1 (ctx.stop graceful cascade)
 
@@ -181,11 +181,11 @@
 - [tooling] effect 같은 _라이브러리 런타임 패키지_ 는 항상 `peerDependencies` — 사용자와 _같은 module 인스턴스_ 공유해야 actor Fiber/Scheduler 가 동작. `dependencies` 에 두면 두 인스턴스 install 위험. pnpm hoist 가 보호하지만 _확실 보장은 peerDep_. (도그푸딩 #2 진입 직전 사용자 지적으로 정정 — ADR-033)
 - [tooling] 라이브러리 패키지 검증 환경 (devDep) 과 호환 범위 (peerDep) 를 _분리_. devDep = ^3.21.0 (현재 검증), peerDep = ^3.10.0 (호환 범위 넓게). 우리가 새 API 쓰면 peerDep 하한 같이 올림.
 
-### 2026-05-09 — 도그푸딩 #2 사이클 0 (poly-phony probe)
+### 2026-05-09 — 도그푸딩 #2 사이클 0 (consumer probe)
 
-- [tooling] `file:../../../effect-actor` + `exports: { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } }` 조합이 poly-phony vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader 설정/build step 없이 30줄 probe 통과 (ActorSystem.create + Behaviors.receiveMessage + tell + Behaviors.same + sys.shutdown). ADR-032 의도 그대로.
-- [tooling] effect 단일 인스턴스 보장 확인 — poly-phony 측 effect@3.21.2 가 root node_modules에 hoist, effect-actor symlink 가 그것을 가리킴. ADR-033 의 peerDep 의도 실제 검증.
-- [tooling] poly-phony _기존_ peerDep 충돌 (`@effect/vitest@0.29.0` peerDep `vitest ^3.2.0` ↔ root `vitest ^4.1.5`) 이 file: dep 추가 시 npm 재해석으로 노출. effect-actor 무관. `--legacy-peer-deps` 우회 — poly-phony 쪽 후속 정리.
+- [tooling] `file:../../../effect-actor` + `exports: { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } }` 조합이 consumer vitest@4.1.5 환경에서 source-direct import _바로 동작_. 별도 loader 설정/build step 없이 30줄 probe 통과 (ActorSystem.create + Behaviors.receiveMessage + tell + Behaviors.same + sys.shutdown). ADR-032 의도 그대로.
+- [tooling] effect 단일 인스턴스 보장 확인 — consumer 측 effect@3.21.2 가 root node_modules에 hoist, effect-actor symlink 가 그것을 가리킴. ADR-033 의 peerDep 의도 실제 검증.
+- [tooling] consumer _기존_ peerDep 충돌 (`@effect/vitest@0.29.0` peerDep `vitest ^3.2.0` ↔ root `vitest ^4.1.5`) 이 file: dep 추가 시 npm 재해석으로 노출. effect-actor 무관. `--legacy-peer-deps` 우회 — consumer 쪽 후속 정리.
 
 ### 2026-05-09 — 도그푸딩 #2 사이클 2 (LLMBackend.Generate, Stream pass-through)
 
@@ -211,7 +211,7 @@
 
 - [api] watch+ask race-fail wrapper (가이드 §wrapper) 동작 확인 — `Effect.raceFirst(ctx.ask, ctx.watchTerminated → fail ActorClosed)`. raceFirst 명시 (race는 첫 success winner라 fail 전파 안 됨, 가이드 §11.6 그대로).
 - [api] 외부 ref.ask 부재로 인한 bootstrap pattern — Behaviors.setup<never>의 setup 안에서 spawn + Effect.forkDaemon(ask) + Effect.sleep + ctx.stop 한 번에. setup 완료 시점에 외부 Deferred 기다리는 패턴. 도메인 actor 없이 wrapper 검증할 때 표준 형태.
-- [api] ActorClosed Tagged Error는 poly-phony 측 정의 (ADR-028 거절 항목). path 식별자는 ActorRef.toString(target) — 명시적 helper 노출, 자연스러움.
+- [api] ActorClosed Tagged Error는 consumer 측 정의 (ADR-028 거절 항목). path 식별자는 ActorRef.toString(target) — 명시적 helper 노출, 자연스러움.
 
 ### 2026-05-09 — 도그푸딩 #2 사이클 5 (cascade shutdown — FINDING)
 
@@ -249,14 +249,14 @@
 
 ### 2026-05-09 — 도그푸딩 #2 사이클 5 BUG 후속 검증 (consumer 측)
 
-- [runtime] poly-phony cascade.test.ts 의 100ms grace window 제거 후 통과 (9ms, 5회 flake-free). spawn 직후 sys.shutdown 호출해도 cascade 가 children setup 완료까지 기다린 뒤 depth-first PostStop 발사 (`child:a:setup → child:b:setup → child:b:poststop → child:a:poststop → root`). spawn happens-before contract 가 production 시점에서도 정상.
+- [runtime] consumer cascade.test.ts 의 100ms grace window 제거 후 통과 (9ms, 5회 flake-free). spawn 직후 sys.shutdown 호출해도 cascade 가 children setup 완료까지 기다린 뒤 depth-first PostStop 발사 (`child:a:setup → child:b:setup → child:b:poststop → child:a:poststop → root`). spawn happens-before contract 가 production 시점에서도 정상.
 - [process] consumer 분석 (_"STM transaction 경계 미흡"_) 은 _부분적으로만_ 맞음. 실제 root cause 는 두 layer:
   1. spawn happens-before 부재 — STM 과 별개, fiber fork 후 Setup 평가 완료 await 안 함. Deferred latch 로 fix.
   2. Effect 3.21.2 `TMap.remove` 본체 버그 — `Chunk.partition` 술어 자리 잘못, hash 충돌 bucket 전부 비움. 우리 Registry 키들이 같은 bucket 으로 떨어져 cascade silent skip 야기. STM tx 자체는 atomic 했음, 그 _안의_ TMap.remove 가 broken.
   - (1) 만 fix 했으면 cascade 는 여전히 silent skip. consumer 가 라이브러리 내부 안 보니 (1) layer 로 추론한 건 자연스럽고 합리적 — _abstraction leak_ 의 사례. _라이브러리 잣대로 재해석_ 의 ADR-028 정신 그대로 (consumer 추론 채택 X, 우리 측 실측 채택).
 - [tooling] **도그푸딩의 _진짜 가치_** — consumer lifecycle race 시나리오 (spawn → shutdown → cleanup) 가 라이브러리 격리 테스트가 못 잡는 BUG 를 surface. 라이브러리 측 system.test.ts 는 _spawn 후 sleep → shutdown_ 패턴이 default 였고, _즉시 shutdown_ 케이스가 없었음. consumer 가 _당연한 사용 시나리오_ 로 자연 노출 → 라이브러리 측 spawn race fix 사이클로 후속.
 - [process] M3.1 사이클 1 의 입력 → 결과 흐름:
-  - 입력: poly-phony 측 100ms grace 우회 보고 (도그푸딩 #2 cycle 5)
+  - 입력: consumer 측 100ms grace 우회 보고 (도그푸딩 #2 cycle 5)
   - 진단 (consumer): STM 경계 추측
   - 진단 (라이브러리 측 실측): (a) latch + (b) TMap.remove 버그 두 layer
   - 후속: latch + Chunk LIFO + TMap → TRef<HashMap> 우회 (사용자 표면 변경 0)
@@ -343,7 +343,7 @@
 - [discovery] **PreRestart 처리 도중 fail 시 단순 stop 강등** — 사이클 3 결정으로 일단 단순화 (재귀 supervision 없음). M5 withLimit (재시도 한도) 와 함께 본격 처리 예정. 현재 단계는 _안전망_.
 - [process] **세 발견 의제는 같은 패밀리** — _stop/cleanup 흐름의 여러 경로 정합성_. 자발 Stopped / 외부 ctx.stop / supervisor stop 강등 / supervisor restart — 각 경로의 PostStop / watcher / Scope cleanup / fiber 종료 약속이 통일되지 않음. M4 끝 도그푸딩 + ADR-037 (가칭 _stop 경로 통일_) 후보.
 - [process] DoD 부분 체크 — `examples/05` 항목 ✅. _M4 끝 도그푸딩 (~1주, ADR-024)_ 항목은 _사용자 진행 대기_ — M4 _전체_ DoD 확정은 도그푸딩 후속 fix 후 (M3 패턴과 동일).
-- [process] 도그푸딩 진행 방향 결정 — **poly-phony 측에서 직접** (M3 도그푸딩 #2 패턴 동일). 사이클 5 는 examples/05 + 발견 의제 정리로 닫고, 도그푸딩 입력 받으면 M4.도그푸딩 / M4.1 후속 fix 후속 사이클 진행 예정. 사이클 5 발견 3 의제 (supervisor stop PostStop / 자발 Stopped watcher / PreRestart 재실패) 도 poly-phony 사용 중 _실제 노출_ 되는지 확인 후 우선순위 정함.
+- [process] 도그푸딩 진행 방향 결정 — **consumer 측에서 직접** (M3 도그푸딩 #2 패턴 동일). 사이클 5 는 examples/05 + 발견 의제 정리로 닫고, 도그푸딩 입력 받으면 M4.도그푸딩 / M4.1 후속 fix 후속 사이클 진행 예정. 사이클 5 발견 3 의제 (supervisor stop PostStop / 자발 Stopped watcher / PreRestart 재실패) 도 consumer 사용 중 _실제 노출_ 되는지 확인 후 우선순위 정함.
 
 
 
@@ -365,7 +365,7 @@
 
 
 
-### 2026-05-09 — M4 도그푸딩 #3 (poly-phony 측, 5 사이클)
+### 2026-05-09 — M4 도그푸딩 #3 (consumer 측, 5 사이클)
 
 #### 결과 요약
 
@@ -390,7 +390,7 @@ F1 (shutdown hang) 은 우리 사이클 5 에서 발견 못 한 _신규_. consum
 
 1. **사이클 1**: F1 진단 + fix. consumer reproducer 받아 system.test.ts 박고 _진짜 root cause_ 확정. 가설 (watchWith dangling subscription → drain 대기) 검증.
 2. **사이클 2**: 의제 1+2 (자발 stop / supervisor stop 강등 시 PostStop + watcher 통합). ADR-037 (_stop/cleanup 경로 통일_) 박을지 결정 — 사이클 1 의 진단으로 단일 root cause 확정되면 ADR-037 박음.
-3. **사이클 3**: poly-phony 측 재검증 → M4 _전체_ DoD 🟢.
+3. **사이클 3**: consumer 측 재검증 → M4 _전체_ DoD 🟢.
 
 #### M5 로 미룸
 
@@ -511,13 +511,13 @@ ABA test (M3 ctx.watch 사이클 2) 실패 — 외부 stopActor 의 watcher 알�
 
 #### 다음 (사이클 3)
 
-poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특히 cycle 3 watchWith + shutdown / cycle 5A 자발 / cycle 5C supervisor stop) 통과 확인. 모두 통과 시 M4 _전체_ DoD 🟢.
+consumer 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특히 cycle 3 watchWith + shutdown / cycle 5A 자발 / cycle 5C supervisor stop) 통과 확인. 모두 통과 시 M4 _전체_ DoD 🟢.
 
 
 
 ### 2026-05-09 — M4.1 사이클 3 (재검증) + M4 완료 명시
 
-#### 재검증 결과 (poly-phony 측, 5 사이클 × 5회 = 25회)
+#### 재검증 결과 (consumer 측, 5 사이클 × 5회 = 25회)
 
 - **F1 (cycle 3 sys.shutdown hang with watchWith)**: 1112ms timeout → 111ms 정상 종료. ✅
 - **의제 2 (cycle 5A 자발 `Behaviors.stopped` → watcher 미알림)**: childGoneCount 0 → 1. ✅
@@ -530,7 +530,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 
 - [process] **M4 마일스톤 _전체_ DoD 확정.** 코드 사이클 1~5 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 후속 사이클 1~3 (F1 + 의제 1+2 fix + consumer 측 25회 flake-free 재검증) 모두 충족. PLAN.md M4 상태 표기 🟢 완료. 누적 161 테스트.
 - [process] M4 의 _진짜 완료_ 도 M3 패턴 그대로 — 코드 작성 끝 (사이클 5) 이 아니라 _도그푸딩 후속 fix 까지 통과한 시점_. ADR-024 정신 일관 (M2 끝 #1 → ADR-028~031, M3 끝 #2 → M3.1, M4 끝 #3 → M4.1).
-- [insight] **single root cause 가설 검증.** consumer (poly-phony) 측 ADR-037 가설 = "F3 단일 root cause". 라이브러리 측 진단 = "두 layer (의제 1 = 통로 호출 안 됨, 의제 2 = cleanup 자체 부재)". 결론: _semantic 일치_ 측면에서 가설 정확, _근본 메커니즘_ 측면에서는 두 layer. 작은 fix 두 개 (`onSelfTermination` 콜백 + cleanup 단일 source of truth) 로 4개 finding (F1 + F2 + 의제 1 + 의제 2) 모두 closed → consumer 가설의 _semantic 통일_ 직관이 사실상 맞았음. ADR-037 큰 통일은 미루고 작은 fix 로 충분 → _라이브러리 설계 우선_ (ADR-028) 정신 그대로.
+- [insight] **single root cause 가설 검증.** consumer (consumer) 측 ADR-037 가설 = "F3 단일 root cause". 라이브러리 측 진단 = "두 layer (의제 1 = 통로 호출 안 됨, 의제 2 = cleanup 자체 부재)". 결론: _semantic 일치_ 측면에서 가설 정확, _근본 메커니즘_ 측면에서는 두 layer. 작은 fix 두 개 (`onSelfTermination` 콜백 + cleanup 단일 source of truth) 로 4개 finding (F1 + F2 + 의제 1 + 의제 2) 모두 closed → consumer 가설의 _semantic 통일_ 직관이 사실상 맞았음. ADR-037 큰 통일은 미루고 작은 fix 로 충분 → _라이브러리 설계 우선_ (ADR-028) 정신 그대로.
 - [process] 다음 갈래 후보: (a) M5 진입 (Backoff / Stash / Timer), (b) Effect TMap 본체 PR (issue #6225 follow-up), (c) M∞ 직전 빌드 도구 결정 (ADR-027 후속). _라이브러리 설계 우선_ 정신상 (a) 가 자연스러운 다음.
 
 
@@ -593,7 +593,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 - [insight] **examples 작성 = 사용자 표면의 _체험_ — 표면 어색함 1차 발견 기회.** 사이클 4 LEARNINGS 의 _Effect 밖 throw_ cliff 가 examples 06 작성 시 다시 노출되지 않게 _Effect.sync 안에서 throw_ 패턴을 _examples 의 공식 패턴_ 으로 굳힘 (05-restart 와 일관). 사용자가 examples 모방하면 cliff 안 부딪힘.
 - [process] USAGE.md 갱신 — _Behaviors 빌더 카탈로그_ + _ActorContext 표면_ + _Tagged Errors_ + _안 되는 것_ 표 모두 M5 표면 (withTimers / withStash / restartWithBackoff / withLimit / ctx.fork / scheduleOnce + RestartLimitExceeded / StashOverflow) 추가. _안 되는 것_ 표는 _진짜 미구현_ (ref.ask, withResetBackoffAfter, matchSchema, unstash 부분, startTimerAtFixedRate) 만 남김. M5 코드 끝 시점의 _현재 표면_ 한 표로 정리.
 - [process] M5 사이클 5 = 코드 _DoD 끝_, 본격 도그푸딩 (M5.1) 만 남음. M3.1, M4.1 패턴 그대로 — 후속 사이클 입력 후 _M5 전체 DoD 🟢_.
-- [process] 다음 갈래: (a) M5.1 본격 도그푸딩 _즉시_ — poly-phony 측 전면 사용 가이드, (b) _Effect 밖 throw_ 의 makeReceive fix 미니 사이클 (사이클 5 LEARNINGS 의 후속 후보) 먼저 박고 도그푸딩 입력, (c) Effect TMap upstream PR (#6225 follow-up). _라이브러리 설계 우선_ 정신상 (b) → (a) 순서 자연스러움.
+- [process] 다음 갈래: (a) M5.1 본격 도그푸딩 _즉시_ — consumer 측 전면 사용 가이드, (b) _Effect 밖 throw_ 의 makeReceive fix 미니 사이클 (사이클 5 LEARNINGS 의 후속 후보) 먼저 박고 도그푸딩 입력, (c) Effect TMap upstream PR (#6225 follow-up). _라이브러리 설계 우선_ 정신상 (b) → (a) 순서 자연스러움.
 
 
 
@@ -768,7 +768,7 @@ poly-phony 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특�
 
 - [verify] **사이클 1 (smoke)**: `npm install @loveqoo/effect-actor@0.1.0` 정상 (npm `--legacy-peer-deps` 사용), import resolve OK, tsc strict (`exactOptionalPropertyTypes` + `noUncheckedIndexedAccess`) 통과, 실행 round-trip 30ms / expected 출력 정확. published tarball 깔끔 (file: dep 시절 `.git`, `AGENTS.md` 흔적 0).
 - [verify] **사이클 2 (IDE + 도메인)**: `.d.ts` + `.d.ts.map` 모두 패키지 포함 — 정의 추적 가능. tsc 가 모든 import 의 generic/overload 정확 해석. **도메인 사이클 = ADR-045 의 watchTerminated + 재spawn** 정확 동작 (`echoes1 = ["from-w1"]`, `echoes2 = ["from-w2"]`, terminatedSeen 1회) — _배포한 코드_ 가 사이클 4 fix 의 semantics 보존.
-- [verify] poly-phony agent 119/120 (1 skipped 무관), 회귀 0, 3회 flake-free 5.88s.
+- [verify] consumer agent 119/120 (1 skipped 무관), 회귀 0, 3회 flake-free 5.88s.
 - [observation] **`--legacy-peer-deps` 필요했음** — npm 의 strict peer dep 처리. pnpm 은 일반적으로 자동 처리. 0.1.1 docs patch 후보 (README 에 npm 시 안내).
 - [insight] **packaging DoD = _진짜 published tarball + 진짜 IDE_.** source-direct 도그푸딩 (#4) 은 _기능_ 검증 — exports / .d.ts / IDE 는 검증 안 됨. #5 가 그 layer 메움. 향후 라이브러리 첫 배포마다 _이 사이클 _ 필수.
 - [insight] **ADR-045 의 _배포 환경_ 검증.** 사이클 4 의 fix (Terminated semantics 보존) 가 _내부 테스트_ 가 아닌 _진짜 dist/ + npm install + 다른 워크스페이스_ 에서도 정확 동작. 사이클 4 의 회귀 테스트 5개 가 _사용자 측 환경_ 에서도 같은 보장 — TDD + packaging dogfood 이 _모든 layer 검증_.

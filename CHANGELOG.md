@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.1.0] - 2026-05-10
 
-First public release. Output of milestones M0 through M5 plus the M∞.1 review-feedback cycles (ADR-043/044/045), validated by 4 dogfooding rounds against [poly-phony](https://github.com/loveqoo/poly-phony) and 3 rounds of external `codex review` before publish.
+First public release. Output of milestones M0 through M5 plus the M∞.1 review-feedback cycles (ADR-043/044/045), validated by 4 in-tree dogfooding rounds in a separate consumer workspace and 3 rounds of external `codex review` before publish.
 
 ### Added
 

@@ -199,7 +199,7 @@
 
 **마일스톤 완료 조건 (DoD) — 모두 충족 ✅:**
 - [x] `examples/05-restart.ts` — restart 시 ref 안정성 + mailbox 보존 + Scope 자동 정리 검증 (사이클 5)
-- [x] **M4 끝 도그푸딩 (~1주, ADR-024)** — poly-phony 측 5 사이클 완료. 핵심 약속 9개 중 ✅ 8 + ⚠️ 1, 의제 1·2 노출 확정 + F1 신규 BUG (sys.shutdown hang when watchWith). 후속 fix → M4.1.
+- [x] **M4 끝 도그푸딩 (~1주, ADR-024)** — consumer 측 5 사이클 완료. 핵심 약속 9개 중 ✅ 8 + ⚠️ 1, 의제 1·2 노출 확정 + F1 신규 BUG (sys.shutdown hang when watchWith). 후속 fix → M4.1.
 - [x] **M4.1 후속 fix + 재검증** — 4개 finding (F1 + 의제 1 + 의제 2 + F2) 모두 closed, consumer 측 5 사이클 × 5회 = 25회 flake-free.
 
 **완료된 사이클:**
@@ -212,7 +212,7 @@
 **M4.1 후속 사이클 (도그푸딩 #3 결과 fix):**
 - 🟢 사이클 1 — F1 (sys.shutdown hang when watchWith): self-loop watcher 알림 시 status 체크 추가 (죽어가는 watcher skip). 1112ms timeout → 111ms 정상 종료.
 - 🟢 사이클 2 — 의제 1+2 (자발 stop / supervisor stop 강등 시 PostStop+watcher 통합): `onSelfTermination` 콜백 도입, `stopActor` 의 cleanup 부분을 단일 source of truth 로 통합. ADR-036. 4 테스트 (총 161).
-- 🟢 사이클 3 — poly-phony 측 재검증 (5 사이클 × 5회 = 25회 flake-free, 4개 finding 모두 closed, 회귀 0). M4 _전체_ DoD 🟢.
+- 🟢 사이클 3 — consumer 측 재검증 (5 사이클 × 5회 = 25회 flake-free, 4개 finding 모두 closed, 회귀 0). M4 _전체_ DoD 🟢.
 
 **M4 _전체_ DoD 확정 (2026-05-09):** 코드 + 도그푸딩 + 후속 fix + 재검증 모두 충족. 161 테스트.
 
@@ -247,7 +247,7 @@
 - [x] `examples/06-backoff.ts` — restartWithBackoff (사이클 5)
 - [x] `examples/07-stash.ts` — withStash (사이클 5)
 - [x] `examples/08-timer.ts` — withTimers (사이클 5)
-- [x] **M5 끝 _본격_ 도그푸딩 (ADR-024)** — poly-phony #4 통과. 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. consumer 시점 표면 거친 부분 없음.
+- [x] **M5 끝 _본격_ 도그푸딩 (ADR-024)** — consumer #4 통과. 5 사이클 × 3회 = 15회 flake-free, finding 0, 회귀 0. consumer 시점 표면 거친 부분 없음.
 
 **완료된 사이클:**
 - 🟢 사이클 1 — `Strategies.restart.withLimit({ maxNrOfRetries, withinTimeRange })` + 의제 3 (PreRestart 재실패 → stop 강등) 통합. ADR-037 박음. `RestartLimitExceeded` tagged error 추가. 누적 169 테스트, 5회 flake-free.
@@ -259,7 +259,7 @@
 
 **M5.1 후속 사이클 (도그푸딩 #4 결과):**
 - 🟢 사이클 1 (가이드 작성) — `docs/DOGFOODING.md` 박음.
-- 🟢 사이클 2 (도그푸딩 진행) — poly-phony 측 5 사이클 × 3회 모두 통과. _finding 0, 회귀 0, 후속 fix 불요._
+- 🟢 사이클 2 (도그푸딩 진행) — consumer 측 5 사이클 × 3회 모두 통과. _finding 0, 회귀 0, 후속 fix 불요._
 
 **M5 _전체_ DoD 확정 (2026-05-09):** 코드 + examples + 도그푸딩 #4 통과 + 안전망 (Effect 밖 throw fix). 201 테스트.
 
@@ -275,11 +275,11 @@
 ## M∞. 본격 도그푸딩 + 출시
 
 **이 시점에 사용자가 할 수 있는 것:**
-- poly-phony에서 `@loveqoo/effect-actor` import 해서 실제 Agent 구축
+- consumer에서 `@loveqoo/effect-actor` import 해서 실제 Agent 구축
 - npm publish
 
 **포함:**
-- poly-phony 에서 진짜 사용
+- consumer 에서 진짜 사용
 - 발견된 API 어색함 → 본 레포에서 수정 → minor 버전 갱신
 - `setup-deploy` 셋업 (npm publish 흐름)
 - `/ship` / `/land-and-deploy` 흐름 적용
@@ -310,7 +310,7 @@
 - 이 문서의 체크리스트 갱신
 - 짧은 3줄 회고 (사용자와)
 
-**M2/M3/M4 끝마다** _가벼운 도그푸딩 사이클_ (~1주, poly-phony agent — ADR-024). M5 끝 _본격_ 도그푸딩.
+**M2/M3/M4 끝마다** _가벼운 도그푸딩 사이클_ (~1주, consumer agent — ADR-024). M5 끝 _본격_ 도그푸딩.
 
 ---
 

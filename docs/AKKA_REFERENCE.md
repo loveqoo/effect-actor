@@ -250,19 +250,19 @@ Behaviors.withStash[T](capacity = 100) { stash =>
 - 따라서 restart 도중 들어온 메시지는 _큐에 쌓였다가_ 새 Behavior에 도달한다.
 - 이 모델 없이는 "stable ActorRef + restart" 가 무의미하다 — ref는 같은데 메시지가 사라지면 외부 입장에서 파편화된다.
 
-### 9.2 Polyphony와의 격차
+### 9.2 초기 실험과의 격차
 
-[poly-phony 격차표](#10-polyphony와의-비교) 참고. 핵심: Polyphony는 메일박스가 _액터 인스턴스에 종속_ 되어 있어 restart 시 메시지가 사라진다.
+아래 [§ 10 격차표](#10-naive-effect-actor-구현과의-비교) 참고. 핵심: Effect 만으로 Actor 를 단순 구현하면 메일박스가 _액터 인스턴스에 종속_ 되어 있어 restart 시 메시지가 사라진다.
 
 이 프로젝트에서는 **메일박스를 ActorPath 키로 registry에 보관** — 인스턴스(Fiber)와 분리한다.
 
 ---
 
-## 10. Polyphony와의 비교
+## 10. naive Effect-actor 구현과의 비교
 
-(원본은 사용자가 정리한 격차표.)
+(원본은 사용자가 정리한 격차표 — 이전 내부 실험 vs Akka Typed.)
 
-| Akka 전제 | Polyphony 현재 |
+| Akka 전제 | naive 구현 |
 |---|---|
 | ActorRef = 논리 주소 (재시작에도 동일) | ref가 곧 closure-bound value (재시작 시 새 ref) |
 | Mailbox는 actor instance와 분리 (restart 시 보존) | Mailbox가 액터 인스턴스에 종속 |
