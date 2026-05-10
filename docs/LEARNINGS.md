@@ -773,3 +773,12 @@ consumer 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특히 
 - [insight] **packaging DoD = _진짜 published tarball + 진짜 IDE_.** source-direct 도그푸딩 (#4) 은 _기능_ 검증 — exports / .d.ts / IDE 는 검증 안 됨. #5 가 그 layer 메움. 향후 라이브러리 첫 배포마다 _이 사이클 _ 필수.
 - [insight] **ADR-045 의 _배포 환경_ 검증.** 사이클 4 의 fix (Terminated semantics 보존) 가 _내부 테스트_ 가 아닌 _진짜 dist/ + npm install + 다른 워크스페이스_ 에서도 정확 동작. 사이클 4 의 회귀 테스트 5개 가 _사용자 측 환경_ 에서도 같은 보장 — TDD + packaging dogfood 이 _모든 layer 검증_.
 - [milestone] **M∞ _전체_ DoD 🟢 (2026-05-10)**. (a)~(g) + M∞.1 후속 5 사이클 + 도그푸딩 #5. 남은 (d) TMap upstream PR 은 _별도 의제_ — 우리 측 우회 (ADR-031 보강) 가 0.1.0 에서 정상 동작 확인됨.
+
+
+
+### 2026-05-10 — 0.1.1 docs-only patch publish
+
+- [milestone] **`@loveqoo/effect-actor@0.1.1` publish (2026-05-10).** 0.1.0 의 _같은 날_ docs patch — 코드 0 변화. 누적 docs 갱신 (README 0.1.0 publish 사실 반영, 내부 작업장명 일괄 제거, 환류 → 후속, examples 09 + 01~08 Data.TaggedEnum 변형) 을 한 번에.
+- [process] **npm 정책 — 같은 버전 republish 금지.** `0.1.0` 으로 다시 publish 시도하면 `403 Forbidden — cannot publish over previously published versions`. _docs 만 갱신_ 도 _새 버전_ 으로만 가능. ADR-041 의 _patch (y) = bug fix / internal / **docs**_ 정신 그대로 — minor (x) 안 올리고 patch 만.
+- [insight] **0.x 의 docs patch 정신.** _코드 변화 0 인데 patch_ 가 어색해 보일 수 있지만, ADR-041 이 명시적으로 _docs_ 도 patch 후보. npm 의 immutable version 정책 + Keep-a-Changelog 의 _per-version 기록_ 정신과 결이 같음. 한 번 publish 한 README 가 _그 버전의 README_ 라는 의미가 강해짐.
+- [insight] **CHANGELOG 의 Documentation 섹션 첫 사용.** 0.1.1 entry 가 _Added/Changed/Documentation_ 세 섹션. _Documentation_ 섹션 자체가 _이번 patch 의 본질이 docs_ 임을 사용자에게 즉시 표현.
