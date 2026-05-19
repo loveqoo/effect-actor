@@ -782,3 +782,13 @@ consumer 측 재검증 — M4.1 fix 가 도그푸딩 #3 의 5 사이클 (특히 
 - [process] **npm 정책 — 같은 버전 republish 금지.** `0.1.0` 으로 다시 publish 시도하면 `403 Forbidden — cannot publish over previously published versions`. _docs 만 갱신_ 도 _새 버전_ 으로만 가능. ADR-041 의 _patch (y) = bug fix / internal / **docs**_ 정신 그대로 — minor (x) 안 올리고 patch 만.
 - [insight] **0.x 의 docs patch 정신.** _코드 변화 0 인데 patch_ 가 어색해 보일 수 있지만, ADR-041 이 명시적으로 _docs_ 도 patch 후보. npm 의 immutable version 정책 + Keep-a-Changelog 의 _per-version 기록_ 정신과 결이 같음. 한 번 publish 한 README 가 _그 버전의 README_ 라는 의미가 강해짐.
 - [insight] **CHANGELOG 의 Documentation 섹션 첫 사용.** 0.1.1 entry 가 _Added/Changed/Documentation_ 세 섹션. _Documentation_ 섹션 자체가 _이번 patch 의 본질이 docs_ 임을 사용자에게 즉시 표현.
+
+
+
+### 2026-05-19 — Effect TMap.remove 본체 fix PR (#6233) 외부 contributor 진행
+
+- [milestone] **우리 issue #6225 → 외부 contributor mvanhorn 의 fix PR [#6233](https://github.com/Effect-TS/effect/pull/6233) 진행 중** (OPEN, Effect maintainer mikearnaldi reviewer). Effect@3.21.x 의 다음 patch 로 들어갈 예정 (changeset patch level).
+- [verify] **우리 진단 정확성 확인.** PR description 의 root cause 두 줄: (1) `Chunk.partition` 의 [predicate-true, predicate-false] 시맨틱을 _backwards_ 로 destructure — 우리 분석 그대로. (2) predicate 가 `Equal.equals(entry[1], key)` 라 _value vs key_ 비교 — _우리는 못 본 추가 버그_. 두 버그 결합이 _매치된 key 는 남기고 다른 모든 key 제거_ 라는 _완전히 뒤집힌_ 동작. 우리 우회 (TRef<HashMap>) 는 _증상 회피_, PR fix 는 _root cause 2개_.
+- [insight] **issue 보고 → 외부 fix 흐름.** 우리 측 _우회 + ADR 박음_ 만 했는데 외부 contributor 가 _진단 + 테스트 + PR_ 까지 해줌. OSS 의 _작은 selfish 기여_ (issue 보고) 가 _큰 ecosystem 이득_ (본체 fix) 로 돌아오는 패턴. issue 한 줄 정확성이 외부 fix 의 _시간 단축_ 직결.
+- [decision-pending] **fix release 후 결정**: (a) TMap 복귀 (Effect 정통, internal refactor, 0.1.2 patch 또는 0.2.0 minor) vs (b) TRef<HashMap> 유지 (도그푸딩 검증 끝, 변경 위험 0). 둘 다 _라이브러리 설계 우선_ (ADR-028) 관점에서 합리. 도그푸딩 통과한 코드 안 건드리는 _보수_ 가 자연일 수도.
+- [process] **시점 trigger**: PR #6233 merge → Effect 새 patch release → effect-actor 의 peer dep 갱신 (`^3.10.0` → `^3.21.<new patch>`) 결정 → (a)/(b) 분기.

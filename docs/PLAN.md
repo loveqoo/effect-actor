@@ -18,7 +18,7 @@
 | M3.1. spawn race fix | 🟢 완료 | 도그푸딩 #2 사이클 5 발견 → 두 layer fix: (a) Deferred latch happens-before, (b) Effect 3.21.2 TMap.remove 본체 버그 우회 (TRef<HashMap>). 118 테스트, consumer 측 9ms / 5회 flake-free 검증 완료. |
 | M4. Restart | 🟢 완료 | Supervision (resume/restart/stop) + 매처 헬퍼 + Scope 분리 (ADR-035). 사이클 1~5 코드 + M4 끝 도그푸딩 #3 (5 사이클 / 4 finding) + M4.1 후속 (F1 + 의제 1+2 한 번에 fix) + consumer 측 25회 flake-free 재검증. 161 테스트, examples/01~05 동작. |
 | M5. 고급 기능 | 🟢 완료 | Backoff / withLimit / Stash / Timer + examples 06~08 + Effect 밖 throw 안전망. ADR-037~040. 201 테스트. **도그푸딩 #4 통과 — finding 0, 회귀 0, 5×3=15회 flake-free.** |
-| M∞. 출시 | 🟢 완료 | (a)~(g) 모두 ✅, **0.1.0 배포 (2026-05-10)** + **0.1.1 docs patch (같은 날)**, M∞.1 후속 5 사이클 모두 closed (codex 3 라운드 GATE PASS), **도그푸딩 #5 packaging 통과 (finding 0)**. 후속: (d) Effect TMap upstream PR 은 별도 의제로 분리 — 우리 측 우회 (ADR-031 보강) 으로 0.1.x 동작 확인. |
+| M∞. 출시 | 🟢 완료 | (a)~(g) 모두 ✅, **0.1.0 배포 (2026-05-10)** + **0.1.1 docs patch (같은 날)**, M∞.1 후속 5 사이클 모두 closed (codex 3 라운드 GATE PASS), **도그푸딩 #5 packaging 통과 (finding 0)**. (d) Effect TMap upstream PR → 외부 contributor (mvanhorn) 가 [#6233](https://github.com/Effect-TS/effect/pull/6233) 으로 fix, mikearnaldi reviewer 지정 (OPEN, 2026-05-19). merge 후 Effect patch release → 우리 우회 (TRef<HashMap>, ADR-031 보강) 유지 vs TMap 복귀 결정. |
 
 상태 표기: 🟢 완료 · 🟡 진행 중 · 🔴 막힘 · ⚪ 대기
 
